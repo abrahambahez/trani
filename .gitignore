@@ -1,0 +1,4 @@
+sessions/
+temp/
+*.wav
+*.log

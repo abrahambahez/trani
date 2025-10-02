@@ -1,0 +1,424 @@
+#!/bin/bash
+
+set -e
+
+TRANI_DIR="$HOME/trani"
+SESSIONS_DIR="$TRANI_DIR/sessions"
+TEMP_DIR="$TRANI_DIR/temp"
+SESSION_STATE_FILE="$TEMP_DIR/current_session.json"
+RECORDING_PID_FILE="$TEMP_DIR/recording_pid"
+SINK_MODULE_ID_FILE="$TEMP_DIR/sink_module_id"
+LOOP_MIC_MODULE_ID_FILE="$TEMP_DIR/loop_mic_module_id"
+LOOP_SYS_MODULE_ID_FILE="$TEMP_DIR/loop_sys_module_id"
+
+ensure_directories_exist() {
+    mkdir -p "$SESSIONS_DIR"
+    mkdir -p "$TEMP_DIR"
+}
+
+is_session_active() {
+    [ -f "$SESSION_STATE_FILE" ]
+}
+
+get_session_title_from_state() {
+    jq -r '.title' "$SESSION_STATE_FILE"
+}
+
+get_session_path_from_state() {
+    jq -r '.session_path' "$SESSION_STATE_FILE"
+}
+
+generate_session_title() {
+    local manual_title="$1"
+    
+    if [ -n "$manual_title" ]; then
+        echo "$manual_title"
+    else
+        echo "sesion_$(date +%H-%M)"
+    fi
+}
+
+generate_session_directory_name() {
+    local title="$1"
+    echo "$(date +%Y-%m-%d)-$title"
+}
+
+create_session_directory() {
+    local session_dir="$1"
+    mkdir -p "$session_dir"
+}
+
+create_and_open_notes_file() {
+    local session_dir="$1"
+    local notes_file="$session_dir/notas.md"
+    
+    touch "$notes_file"
+    nvim "$notes_file"
+}
+
+save_session_state() {
+    local title="$1"
+    local session_path="$2"
+    
+    cat > "$SESSION_STATE_FILE" <<EOF
+{
+  "active": true,
+  "title": "$title",
+  "started_at": "$(date -Iseconds)",
+  "session_path": "$session_path"
+}
+EOF
+}
+
+setup_audio_virtual_sink() {
+    pactl load-module module-null-sink \
+        sink_name=trani_mix \
+        sink_properties=device.description="Trani_Recording_Mix" \
+        > "$SINK_MODULE_ID_FILE"
+}
+
+setup_microphone_loopback() {
+    pactl load-module module-loopback \
+        source=@DEFAULT_SOURCE@ \
+        sink=trani_mix \
+        latency_msec=1 \
+        > "$LOOP_MIC_MODULE_ID_FILE"
+}
+
+setup_system_audio_loopback() {
+    pactl load-module module-loopback \
+        source=@DEFAULT_MONITOR@ \
+        sink=trani_mix \
+        latency_msec=1 \
+        > "$LOOP_SYS_MODULE_ID_FILE"
+}
+
+start_audio_recording() {
+    pw-record --target trani_mix.monitor \
+        --rate 16000 --channels 1 \
+        "$TEMP_DIR/recording.wav" &
+    
+    echo $! > "$RECORDING_PID_FILE"
+}
+
+notify_recording_started() {
+    local title="$1"
+    notify-send "🎙️ Trani" "Grabación iniciada: $title"
+}
+
+unload_audio_modules() {
+    pactl unload-module "$(cat "$LOOP_SYS_MODULE_ID_FILE")" 2>/dev/null || true
+    pactl unload-module "$(cat "$LOOP_MIC_MODULE_ID_FILE")" 2>/dev/null || true
+    pactl unload-module "$(cat "$SINK_MODULE_ID_FILE")" 2>/dev/null || true
+}
+
+stop_audio_recording() {
+    if [ -f "$RECORDING_PID_FILE" ]; then
+        kill "$(cat "$RECORDING_PID_FILE")" 2>/dev/null || true
+    fi
+}
+
+move_recording_to_session() {
+    local session_dir="$1"
+    mv "$TEMP_DIR/recording.wav" "$session_dir/audio.wav"
+}
+
+notify_processing_started() {
+    notify-send "⏸️ Trani" "Grabación detenida. Procesando..."
+}
+
+transcribe_audio_with_whisper() {
+    local session_dir="$1"
+    
+    "$HOME/whisper.cpp/build/bin/whisper-cli" \
+        -m "$HOME/whisper.cpp/models/ggml-large-v3-turbo.bin" \
+        -f "$session_dir/audio.wav" \
+        -l es \
+        -t 12 \
+        -otxt \
+        -of "$session_dir/transcripcion"
+}
+
+notes_file_has_content() {
+    local notes_file="$1"
+    [ -s "$notes_file" ]
+}
+
+read_file_content() {
+    local file="$1"
+    cat "$file"
+}
+
+generate_prompt_with_notes() {
+    local transcription="$1"
+    local notes="$2"
+    
+    cat <<EOF
+Tienes una transcripción de una sesión y las notas tomadas por el usuario.
+
+TRANSCRIPCIÓN:
+$transcription
+
+NOTAS DEL USUARIO:
+$notes
+
+Genera un documento markdown estructurado con:
+
+1. RESUMEN EJECUTIVO (2-3 párrafos)
+   - Contexto general de la sesión
+   - Puntos clave discutidos
+   - Conclusiones principales
+
+2. DETALLES POR TEMA
+   Usa los temas de las notas del usuario como estructura.
+   Para cada tema identifica en la transcripción:
+   - Detalles específicos mencionados
+   - Datos, fechas, números relevantes
+   - Procesos o procedimientos descritos
+   - Decisiones tomadas
+   - Contexto adicional importante
+
+3. ACCIONES Y PENDIENTES
+   - Action items identificados
+   - Responsables (si se mencionan)
+   - Fechas límite (si se mencionan)
+
+4. DATOS IMPORTANTES
+   - Fechas clave mencionadas
+   - Números, métricas, estadísticas
+   - Nombres de personas referenciadas
+   - Documentos, sistemas o herramientas mencionadas
+
+Mantén el formato limpio y profesional. Usa encabezados claros.
+EOF
+}
+
+generate_prompt_without_notes() {
+    local transcription="$1"
+    
+    cat <<EOF
+Tienes la transcripción de una sesión. Analízala y genera un documento estructurado.
+
+TRANSCRIPCIÓN:
+$transcription
+
+Genera un documento markdown con:
+
+1. RESUMEN EJECUTIVO (2-3 párrafos)
+   - Tema principal de la sesión
+   - Puntos clave discutidos
+   - Conclusiones principales
+
+2. TEMAS PRINCIPALES
+   Identifica los temas principales discutidos y para cada uno incluye:
+   - Contexto y detalles
+   - Puntos específicos mencionados
+   - Decisiones o conclusiones
+
+3. ACCIONES Y PENDIENTES
+   - Action items identificados
+   - Responsables (si se mencionan)
+   - Fechas límite (si se mencionan)
+
+4. DATOS IMPORTANTES
+   - Fechas mencionadas
+   - Números, métricas
+   - Nombres de personas
+   - Referencias a documentos/sistemas
+
+Mantén el formato limpio y profesional.
+EOF
+}
+
+call_claude_api() {
+    local prompt="$1"
+    
+    curl -s https://api.anthropic.com/v1/messages \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "{
+            \"model\": \"claude-sonnet-4-20250514\",
+            \"max_tokens\": 4000,
+            \"messages\": [{
+                \"role\": \"user\",
+                \"content\": $(echo "$prompt" | jq -Rs .)
+            }]
+        }"
+}
+
+extract_text_from_claude_response() {
+    local response="$1"
+    echo "$response" | jq -r '.content[0].text'
+}
+
+generate_summary_with_claude() {
+    local session_dir="$1"
+    local transcription_file="$session_dir/transcripcion.txt"
+    local notes_file="$session_dir/notas.md"
+    local summary_file="$session_dir/resumen.md"
+    
+    local transcription
+    transcription=$(read_file_content "$transcription_file")
+    
+    local prompt
+    if notes_file_has_content "$notes_file"; then
+        local notes
+        notes=$(read_file_content "$notes_file")
+        prompt=$(generate_prompt_with_notes "$transcription" "$notes")
+    else
+        prompt=$(generate_prompt_without_notes "$transcription")
+    fi
+    
+    local claude_response
+    claude_response=$(call_claude_api "$prompt")
+    
+    local summary
+    summary=$(extract_text_from_claude_response "$claude_response")
+    
+    echo "$summary" > "$summary_file"
+}
+
+delete_audio_file() {
+    local session_dir="$1"
+    rm -f "$session_dir/audio.wav"
+}
+
+clean_temp_files() {
+    rm -f "$RECORDING_PID_FILE"
+    rm -f "$SINK_MODULE_ID_FILE"
+    rm -f "$LOOP_MIC_MODULE_ID_FILE"
+    rm -f "$LOOP_SYS_MODULE_ID_FILE"
+    rm -f "$SESSION_STATE_FILE"
+}
+
+notify_session_completed() {
+    local title="$1"
+    local session_path="$2"
+    notify-send "✅ Trani" "Sesión completada: $title\nUbicación: $session_path"
+}
+
+notify_error() {
+    local message="$1"
+    notify-send -u critical "❌ Trani" "Error: $message"
+}
+
+notify_no_active_session() {
+    notify-send "⚠️ Trani" "No hay sesión activa"
+}
+
+notify_session_already_active() {
+    local title="$1"
+    notify-send "⚠️ Trani" "Ya hay una sesión en curso: $title"
+}
+
+start_new_session() {
+    local manual_title="$1"
+    
+    if is_session_active; then
+        local current_title
+        current_title=$(get_session_title_from_state)
+        notify_session_already_active "$current_title"
+        exit 1
+    fi
+    
+    local title
+    title=$(generate_session_title "$manual_title")
+    
+    local session_dir_name
+    session_dir_name=$(generate_session_directory_name "$title")
+    
+    local session_path="$SESSIONS_DIR/$session_dir_name"
+    
+    create_session_directory "$session_path"
+    save_session_state "$title" "$session_path"
+    
+    setup_audio_virtual_sink
+    setup_microphone_loopback
+    setup_system_audio_loopback
+    start_audio_recording
+    
+    notify_recording_started "$title"
+    
+    create_and_open_notes_file "$session_path"
+    
+    stop_active_session
+}
+
+stop_active_session() {
+    if ! is_session_active; then
+        notify_no_active_session
+        exit 1
+    fi
+    
+    local title
+    title=$(get_session_title_from_state)
+    
+    local session_path
+    session_path=$(get_session_path_from_state)
+    
+    stop_audio_recording
+    unload_audio_modules
+    
+    notify_processing_started
+    
+    move_recording_to_session "$session_path"
+    transcribe_audio_with_whisper "$session_path"
+    generate_summary_with_claude "$session_path"
+    delete_audio_file "$session_path"
+    
+    clean_temp_files
+    
+    notify_session_completed "$title" "$session_path"
+}
+
+toggle_session() {
+    local manual_title="$1"
+    
+    if is_session_active; then
+        stop_active_session
+    else
+        start_new_session "$manual_title"
+    fi
+}
+
+show_usage() {
+    echo "Uso: trani [comando] [título]"
+    echo ""
+    echo "Comandos:"
+    echo "  start [título]   Iniciar sesión (abre neovim, al cerrar procesa automáticamente)"
+    echo "  stop             Detener y procesar sesión activa manualmente"
+    echo "  toggle [título]  Alternar entre start/stop"
+    echo ""
+    echo "Ejemplos:"
+    echo "  trani start reunion_equipo"
+    echo "  trani stop"
+    echo "  trani toggle sprint_planning"
+    echo ""
+    echo "Nota: Al usar 'start', la sesión se procesa automáticamente al cerrar neovim."
+}
+
+main() {
+    ensure_directories_exist
+    
+    local command="${1:-}"
+    local title="${2:-}"
+    
+    case "$command" in
+        start)
+            start_new_session "$title"
+            ;;
+        stop)
+            stop_active_session
+            ;;
+        toggle)
+            toggle_session "$title"
+            ;;
+        *)
+            show_usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

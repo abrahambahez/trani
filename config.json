@@ -1,0 +1,20 @@
+{
+	"whisper": {
+		"model_path": "~/whisper.cpp/models/ggml-large-v3-turbo.bin",
+		"binary_path": "~/whisper.cpp/build/bin/whisper-cli",
+		"threads": 12,
+		"language": "es"
+	},
+	"audio": {
+		"sample_rate": 16000,
+		"channels": 1
+	},
+	"claude": {
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 4000
+	},
+	"paths": {
+		"sessions_dir": "~/trani/sessions",
+		"temp_dir": "~/trani/temp"
+	}
+}
