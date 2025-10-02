@@ -1,85 +1,63 @@
-# Trani - Asistente de reuniones
+# Trani - Simple AI meeting assistnant
 
-Transcribe tus reuniones y genera resúmenes inteligentes automáticamente.
+Transcribe your meetings and generate automatic smart summaries.
 
-## ¿Qué hace?
+## What it does?
 
-Trani graba el audio de tu computadora (sistema + micrófono), lo transcribe con Whisper, y usa Claude para generar un resumen estructurado combinado con tus notas.
+Trani records system and mic audio, transcribes it using Whisper, then uses Claude API to generate a structured summary using your notes.
 
-## Instalación rápida
+### NOTE: This is a prototype
+
+This prototype is made for my personal needs (transcribe heavy business meetings with complex information), preferences (Whisper.cc, Claude, Neovim -notes-) and hardware. No model (transciption or LLM) or software is configurable yet.
+
+Also, this is an opinionated workflow. The process is tied to the user note. When the user closes the note, the process finish.
+
+## Quick installation
+
+Add to path and set env varables.
 
 ```bash
-# Añadir al PATH
 echo 'export PATH="$HOME/trani:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
-# Configurar API key de Claude
 echo 'export ANTHROPIC_API_KEY="tu-api-key"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-## Uso
+## Use
+Start a session
 
 ```bash
-# Iniciar sesión
-trani start "nombre_reunion"
-
-# Se abre neovim para tomar notas
-# Al cerrar neovim (:wq), automáticamente:
-# - Detiene la grabación
-# - Transcribe el audio
-# - Genera resumen con Claude
-# - Limpia archivos temporales
+trani start "session_name"
 ```
 
-## Resultado
+- Neovim opens the note file
+- When closing Neovim:
+   - Recording stops
+   - Transcription starts
+   - Claude generates smart summary 
+   - Temp files are cleaned
 
-Cada sesión crea una carpeta con:
+As a result, session is stored with this structure:
+
 
 ```
-sessions/2025-10-01-nombre_reunion/
-├── transcripcion.txt  # Todo lo que se dijo
-├── notas.md          # Tus notas
-└── resumen.md        # Resumen inteligente generado
+sessions/2025-10-01-session_name/
+├── transcripcion.txt  # Transcript
+├── notas.md          # User notes
+└── resumen.md        # AI Summary
 ```
 
-## Requisitos
+## Requirements
 
-- Fedora con PipeWire (instalado por defecto)
-- Whisper.cpp instalado en `~/whisper.cpp`
+- PipeWire (installed by default in Fedora)
+- Whisper.cpp installed in `~/whisper.cpp`
 - Claude API key
-- `jq`, `curl`, `notify-send`
+- `jq`, `curl`, `notify-send` (Gnome)
 
-## Comandos
+## Notes
 
-```bash
-trani start [título]   # Inicia sesión (abre neovim)
-trani stop             # Detiene manualmente
-trani toggle [título]  # Alterna start/stop
-```
+- Original audio will be removed after transcrioption, this is by design, only transcription will persist
+- When user note is empty or non-existent, Claude infers the summary themes
+- You can toogle trani by binding the command to a keyboard shortcut, like `Super+S`
 
-## Ejemplo real
-
-```bash
-$ trani start "planning_sprint"
-🎙️ Trani: Grabación iniciada: planning_sprint
-
-# [Neovim se abre para tomar notas]
-# [Tomas notas durante la reunión]
-# [Cierras neovim con :wq]
-
-⏸️ Trani: Grabación detenida. Procesando...
-✅ Trani: Sesión completada: planning_sprint
-```
-
-## Notas
-
-- El audio original se elimina después de transcribir (solo quedan texto y resumen)
-- Si no tomas notas, Claude genera el resumen solo con la transcripción
-- Usa `Super+S` (o tu shortcut preferido) para ejecutar `trani toggle`
-
----
-
-**Versión:** 1.0 MVP  
-**Autor:** sabhz
-**Licencia:** MIT

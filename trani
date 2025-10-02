@@ -5,15 +5,18 @@ set -e
 TRANI_DIR="$HOME/trani"
 SESSIONS_DIR="$TRANI_DIR/sessions"
 TEMP_DIR="$TRANI_DIR/temp"
+PROMPTS_DIR="$TRANI_DIR/prompts"
 SESSION_STATE_FILE="$TEMP_DIR/current_session.json"
 RECORDING_PID_FILE="$TEMP_DIR/recording_pid"
 SINK_MODULE_ID_FILE="$TEMP_DIR/sink_module_id"
 LOOP_MIC_MODULE_ID_FILE="$TEMP_DIR/loop_mic_module_id"
 LOOP_SYS_MODULE_ID_FILE="$TEMP_DIR/loop_sys_module_id"
+DEFAULT_PROMPT_TEMPLATE="default"
 
 ensure_directories_exist() {
     mkdir -p "$SESSIONS_DIR"
     mkdir -p "$TEMP_DIR"
+    mkdir -p "$PROMPTS_DIR"
 }
 
 is_session_active() {
@@ -22,6 +25,10 @@ is_session_active() {
 
 get_session_title_from_state() {
     jq -r '.title' "$SESSION_STATE_FILE"
+}
+
+get_session_prompt_template_from_state() {
+    jq -r '.prompt_template // "default"' "$SESSION_STATE_FILE"
 }
 
 get_session_path_from_state() {
@@ -59,13 +66,15 @@ create_and_open_notes_file() {
 save_session_state() {
     local title="$1"
     local session_path="$2"
+    local prompt_template="${3:-$DEFAULT_PROMPT_TEMPLATE}"
     
     cat > "$SESSION_STATE_FILE" <<EOF
 {
   "active": true,
   "title": "$title",
   "started_at": "$(date -Iseconds)",
-  "session_path": "$session_path"
+  "session_path": "$session_path",
+  "prompt_template": "$prompt_template"
 }
 EOF
 }
@@ -147,6 +156,39 @@ notes_file_has_content() {
 read_file_content() {
     local file="$1"
     cat "$file"
+}
+
+get_prompt_template_path() {
+    local template_name="$1"
+    local with_notes="$2"
+    
+    if [ "$with_notes" = "true" ]; then
+        echo "$PROMPTS_DIR/${template_name}.txt"
+    else
+        echo "$PROMPTS_DIR/${template_name}_no_notes.txt"
+    fi
+}
+
+load_prompt_template() {
+    local template_path="$1"
+    
+    if [ -f "$template_path" ]; then
+        cat "$template_path"
+    else
+        echo ""
+    fi
+}
+
+fill_prompt_template() {
+    local template="$1"
+    local transcription="$2"
+    local notes="${3:-}"
+    
+    local filled_prompt="$template"
+    filled_prompt="${filled_prompt//\{\{TRANSCRIPTION\}\}/$transcription}"
+    filled_prompt="${filled_prompt//\{\{NOTES\}\}/$notes}"
+    
+    echo "$filled_prompt"
 }
 
 generate_prompt_with_notes() {
@@ -247,6 +289,16 @@ call_claude_api() {
         }"
 }
 
+check_claude_api_error() {
+    local response="$1"
+    echo "$response" | jq -e '.error' > /dev/null 2>&1
+}
+
+get_claude_api_error_message() {
+    local response="$1"
+    echo "$response" | jq -r '.error.message'
+}
+
 extract_text_from_claude_response() {
     local response="$1"
     echo "$response" | jq -r '.content[0].text'
@@ -254,6 +306,7 @@ extract_text_from_claude_response() {
 
 generate_summary_with_claude() {
     local session_dir="$1"
+    local prompt_template="${2:-$DEFAULT_PROMPT_TEMPLATE}"
     local transcription_file="$session_dir/transcripcion.txt"
     local notes_file="$session_dir/notas.md"
     local summary_file="$session_dir/resumen.md"
@@ -261,17 +314,48 @@ generate_summary_with_claude() {
     local transcription
     transcription=$(read_file_content "$transcription_file")
     
-    local prompt
+    local has_notes="false"
+    local prompt_template_path
+    
     if notes_file_has_content "$notes_file"; then
-        local notes
-        notes=$(read_file_content "$notes_file")
-        prompt=$(generate_prompt_with_notes "$transcription" "$notes")
+        has_notes="true"
+        prompt_template_path=$(get_prompt_template_path "$prompt_template" "true")
     else
-        prompt=$(generate_prompt_without_notes "$transcription")
+        prompt_template_path=$(get_prompt_template_path "$prompt_template" "false")
+    fi
+    
+    local template
+    template=$(load_prompt_template "$prompt_template_path")
+    
+    local prompt
+    if [ -n "$template" ]; then
+        if [ "$has_notes" = "true" ]; then
+            local notes
+            notes=$(read_file_content "$notes_file")
+            prompt=$(fill_prompt_template "$template" "$transcription" "$notes")
+        else
+            prompt=$(fill_prompt_template "$template" "$transcription")
+        fi
+    else
+        if [ "$has_notes" = "true" ]; then
+            local notes
+            notes=$(read_file_content "$notes_file")
+            prompt=$(generate_prompt_with_notes "$transcription" "$notes")
+        else
+            prompt=$(generate_prompt_without_notes "$transcription")
+        fi
     fi
     
     local claude_response
     claude_response=$(call_claude_api "$prompt")
+    
+    if check_claude_api_error "$claude_response"; then
+        local error_message
+        error_message=$(get_claude_api_error_message "$claude_response")
+        echo "Error de Claude API: $error_message" > "$summary_file"
+        notify_error "Claude API: $error_message"
+        return 1
+    fi
     
     local summary
     summary=$(extract_text_from_claude_response "$claude_response")
@@ -314,6 +398,7 @@ notify_session_already_active() {
 
 start_new_session() {
     local manual_title="$1"
+    local prompt_template="${2:-$DEFAULT_PROMPT_TEMPLATE}"
     
     if is_session_active; then
         local current_title
@@ -331,7 +416,7 @@ start_new_session() {
     local session_path="$SESSIONS_DIR/$session_dir_name"
     
     create_session_directory "$session_path"
-    save_session_state "$title" "$session_path"
+    save_session_state "$title" "$session_path" "$prompt_template"
     
     setup_audio_virtual_sink
     setup_microphone_loopback
@@ -357,6 +442,9 @@ stop_active_session() {
     local session_path
     session_path=$(get_session_path_from_state)
     
+    local prompt_template
+    prompt_template=$(get_session_prompt_template_from_state)
+    
     stop_audio_recording
     unload_audio_modules
     
@@ -364,36 +452,49 @@ stop_active_session() {
     
     move_recording_to_session "$session_path"
     transcribe_audio_with_whisper "$session_path"
-    generate_summary_with_claude "$session_path"
-    delete_audio_file "$session_path"
     
-    clean_temp_files
-    
-    notify_session_completed "$title" "$session_path"
+    if generate_summary_with_claude "$session_path" "$prompt_template"; then
+        delete_audio_file "$session_path"
+        clean_temp_files
+        notify_session_completed "$title" "$session_path"
+    else
+        echo "La sesión se guardó pero hubo un error al generar el resumen."
+        echo "Transcripción disponible en: $session_path/transcripcion.txt"
+        delete_audio_file "$session_path"
+        clean_temp_files
+    fi
 }
 
 toggle_session() {
     local manual_title="$1"
+    local prompt_template="$2"
     
     if is_session_active; then
         stop_active_session
     else
-        start_new_session "$manual_title"
+        start_new_session "$manual_title" "$prompt_template"
     fi
 }
 
 show_usage() {
-    echo "Uso: trani [comando] [título]"
+    echo "Uso: trani [comando] [título] [--prompt TEMPLATE]"
     echo ""
     echo "Comandos:"
-    echo "  start [título]   Iniciar sesión (abre neovim, al cerrar procesa automáticamente)"
-    echo "  stop             Detener y procesar sesión activa manualmente"
-    echo "  toggle [título]  Alternar entre start/stop"
+    echo "  start [título] [--prompt TEMPLATE]   Iniciar sesión (abre neovim, al cerrar procesa automáticamente)"
+    echo "  stop                                  Detener y procesar sesión activa manualmente"
+    echo "  toggle [título] [--prompt TEMPLATE]  Alternar entre start/stop"
+    echo ""
+    echo "Opciones:"
+    echo "  --prompt TEMPLATE   Usar un prompt personalizado (default: 'default')"
     echo ""
     echo "Ejemplos:"
     echo "  trani start reunion_equipo"
+    echo "  trani start brainstorming --prompt brainstorm"
+    echo "  trani toggle sprint_planning --prompt technical"
     echo "  trani stop"
-    echo "  trani toggle sprint_planning"
+    echo ""
+    echo "Prompts disponibles:"
+    ls -1 "$PROMPTS_DIR" 2>/dev/null | sed 's/_no_notes\.txt$//' | sed 's/\.txt$//' | sort -u | sed 's/^/  - /'
     echo ""
     echo "Nota: Al usar 'start', la sesión se procesa automáticamente al cerrar neovim."
 }
@@ -402,17 +503,35 @@ main() {
     ensure_directories_exist
     
     local command="${1:-}"
-    local title="${2:-}"
+    local title=""
+    local prompt_template="$DEFAULT_PROMPT_TEMPLATE"
+    
+    shift || true
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --prompt)
+                prompt_template="$2"
+                shift 2
+                ;;
+            *)
+                if [ -z "$title" ]; then
+                    title="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
     
     case "$command" in
         start)
-            start_new_session "$title"
+            start_new_session "$title" "$prompt_template"
             ;;
         stop)
             stop_active_session
             ;;
         toggle)
-            toggle_session "$title"
+            toggle_session "$title" "$prompt_template"
             ;;
         *)
             show_usage
