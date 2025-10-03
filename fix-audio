@@ -1,0 +1,7 @@
+#!/bin/bash
+
+pactl list modules short | grep trani | awk '{print $1}' | tac | while read id; do
+    pactl unload-module "$id" 2>/dev/null
+done
+
+echo "✅ Módulos de audio limpiados"
