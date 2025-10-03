@@ -2,3 +2,5 @@ sessions/
 temp/
 *.wav
 *.log
+CLAUDE*
+.claude*
