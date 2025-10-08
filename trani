@@ -35,6 +35,10 @@ get_session_path_from_state() {
     jq -r '.session_path' "$SESSION_STATE_FILE"
 }
 
+get_preserve_audio_from_state() {
+    jq -r '.preserve_audio // "false"' "$SESSION_STATE_FILE"
+}
+
 generate_session_title() {
     local manual_title="$1"
     
@@ -67,14 +71,16 @@ save_session_state() {
     local title="$1"
     local session_path="$2"
     local prompt_template="${3:-$DEFAULT_PROMPT_TEMPLATE}"
-    
+    local preserve_audio="${4:-false}"
+
     cat > "$SESSION_STATE_FILE" <<EOF
 {
   "active": true,
   "title": "$title",
   "started_at": "$(date -Iseconds)",
   "session_path": "$session_path",
-  "prompt_template": "$prompt_template"
+  "prompt_template": "$prompt_template",
+  "preserve_audio": "$preserve_audio"
 }
 EOF
 }
@@ -365,7 +371,8 @@ generate_summary_with_claude() {
 
 delete_audio_file() {
     local session_dir="$1"
-    rm -f "$session_dir/audio.wav"
+    local preserve="${2:-false}"
+    [ "$preserve" = "false" ] && rm -f "$session_dir/audio.wav"
 }
 
 clean_temp_files() {
@@ -399,34 +406,35 @@ notify_session_already_active() {
 start_new_session() {
     local manual_title="$1"
     local prompt_template="${2:-$DEFAULT_PROMPT_TEMPLATE}"
-    
+    local preserve_audio="${3:-false}"
+
     if is_session_active; then
         local current_title
         current_title=$(get_session_title_from_state)
         notify_session_already_active "$current_title"
         exit 1
     fi
-    
+
     local title
     title=$(generate_session_title "$manual_title")
-    
+
     local session_dir_name
     session_dir_name=$(generate_session_directory_name "$title")
-    
+
     local session_path="$SESSIONS_DIR/$session_dir_name"
-    
+
     create_session_directory "$session_path"
-    save_session_state "$title" "$session_path" "$prompt_template"
-    
+    save_session_state "$title" "$session_path" "$prompt_template" "$preserve_audio"
+
     setup_audio_virtual_sink
     setup_microphone_loopback
     setup_system_audio_loopback
     start_audio_recording
-    
+
     notify_recording_started "$title"
-    
+
     create_and_open_notes_file "$session_path"
-    
+
     stop_active_session
 }
 
@@ -435,32 +443,35 @@ stop_active_session() {
         notify_no_active_session
         exit 1
     fi
-    
+
     local title
     title=$(get_session_title_from_state)
-    
+
     local session_path
     session_path=$(get_session_path_from_state)
-    
+
     local prompt_template
     prompt_template=$(get_session_prompt_template_from_state)
-    
+
+    local preserve_audio
+    preserve_audio=$(get_preserve_audio_from_state)
+
     stop_audio_recording
     unload_audio_modules
-    
+
     notify_processing_started
-    
+
     move_recording_to_session "$session_path"
     transcribe_audio_with_whisper "$session_path"
-    
+
     if generate_summary_with_claude "$session_path" "$prompt_template"; then
-        delete_audio_file "$session_path"
+        delete_audio_file "$session_path" "$preserve_audio"
         clean_temp_files
         notify_session_completed "$title" "$session_path"
     else
         echo "La sesión se guardó pero hubo un error al generar el resumen."
         echo "Transcripción disponible en: $session_path/transcripcion.txt"
-        delete_audio_file "$session_path"
+        delete_audio_file "$session_path" "$preserve_audio"
         clean_temp_files
     fi
 }
@@ -468,28 +479,30 @@ stop_active_session() {
 toggle_session() {
     local manual_title="$1"
     local prompt_template="$2"
-    
+    local preserve_audio="$3"
+
     if is_session_active; then
         stop_active_session
     else
-        start_new_session "$manual_title" "$prompt_template"
+        start_new_session "$manual_title" "$prompt_template" "$preserve_audio"
     fi
 }
 
 show_usage() {
-    echo "Uso: trani [comando] [título] [--prompt TEMPLATE]"
+    echo "Uso: trani [comando] [título] [--prompt TEMPLATE] [--preserve-audio]"
     echo ""
     echo "Comandos:"
-    echo "  start [título] [--prompt TEMPLATE]   Iniciar sesión (abre neovim, al cerrar procesa automáticamente)"
-    echo "  stop                                  Detener y procesar sesión activa manualmente"
-    echo "  toggle [título] [--prompt TEMPLATE]  Alternar entre start/stop"
+    echo "  start [título] [--prompt TEMPLATE] [--preserve-audio]   Iniciar sesión (abre neovim, al cerrar procesa automáticamente)"
+    echo "  stop                                                     Detener y procesar sesión activa manualmente"
+    echo "  toggle [título] [--prompt TEMPLATE] [--preserve-audio]  Alternar entre start/stop"
     echo ""
     echo "Opciones:"
     echo "  --prompt TEMPLATE   Usar un prompt personalizado (default: 'default')"
+    echo "  --preserve-audio    Mantener archivo de audio después del procesamiento"
     echo ""
     echo "Ejemplos:"
     echo "  trani start reunion_equipo"
-    echo "  trani start brainstorming --prompt brainstorm"
+    echo "  trani start brainstorming --prompt brainstorm --preserve-audio"
     echo "  trani toggle sprint_planning --prompt technical"
     echo "  trani stop"
     echo ""
@@ -501,18 +514,23 @@ show_usage() {
 
 main() {
     ensure_directories_exist
-    
+
     local command="${1:-}"
     local title=""
     local prompt_template="$DEFAULT_PROMPT_TEMPLATE"
-    
+    local preserve_audio="false"
+
     shift || true
-    
+
     while [ $# -gt 0 ]; do
         case "$1" in
             --prompt)
                 prompt_template="$2"
                 shift 2
+                ;;
+            --preserve-audio)
+                preserve_audio="true"
+                shift
                 ;;
             *)
                 if [ -z "$title" ]; then
@@ -522,16 +540,16 @@ main() {
                 ;;
         esac
     done
-    
+
     case "$command" in
         start)
-            start_new_session "$title" "$prompt_template"
+            start_new_session "$title" "$prompt_template" "$preserve_audio"
             ;;
         stop)
             stop_active_session
             ;;
         toggle)
-            toggle_session "$title" "$prompt_template"
+            toggle_session "$title" "$prompt_template" "$preserve_audio"
             ;;
         *)
             show_usage
