@@ -8,9 +8,6 @@ TEMP_DIR="$TRANI_DIR/temp"
 PROMPTS_DIR="$TRANI_DIR/prompts"
 SESSION_STATE_FILE="$TEMP_DIR/current_session.json"
 RECORDING_PID_FILE="$TEMP_DIR/recording_pid"
-SINK_MODULE_ID_FILE="$TEMP_DIR/sink_module_id"
-LOOP_MIC_MODULE_ID_FILE="$TEMP_DIR/loop_mic_module_id"
-LOOP_SYS_MODULE_ID_FILE="$TEMP_DIR/loop_sys_module_id"
 DEFAULT_PROMPT_TEMPLATE="default"
 
 ensure_directories_exist() {
@@ -85,35 +82,25 @@ save_session_state() {
 EOF
 }
 
-setup_audio_virtual_sink() {
-    pactl load-module module-null-sink \
-        sink_name=trani_mix \
-        sink_properties=device.description="Trani_Recording_Mix" \
-        > "$SINK_MODULE_ID_FILE"
-}
-
-setup_microphone_loopback() {
-    pactl load-module module-loopback \
-        source=@DEFAULT_SOURCE@ \
-        sink=trani_mix \
-        latency_msec=1 \
-        > "$LOOP_MIC_MODULE_ID_FILE"
-}
-
-setup_system_audio_loopback() {
-    pactl load-module module-loopback \
-        source=@DEFAULT_MONITOR@ \
-        sink=trani_mix \
-        latency_msec=1 \
-        > "$LOOP_SYS_MODULE_ID_FILE"
+get_active_monitor_source() {
+    local default_sink=$(pactl get-default-sink)
+    [ -z "$default_sink" ] && return 1
+    echo "${default_sink}.monitor"
 }
 
 start_audio_recording() {
-    pw-record --target trani_mix.monitor \
-        --rate 16000 --channels 1 \
-        "$TEMP_DIR/recording.wav" &
-    
-    echo $! > "$RECORDING_PID_FILE"
+    local output_file="$1"
+    local monitor_source=$(get_active_monitor_source) || return 1
+
+    pw-record --target "$monitor_source" \
+        --rate 48000 --channels 2 \
+        "$output_file" &
+
+    local pid=$!
+    echo $pid > "$RECORDING_PID_FILE"
+
+    sleep 0.5
+    kill -0 "$pid" 2>/dev/null || return 1
 }
 
 notify_recording_started() {
@@ -121,16 +108,16 @@ notify_recording_started() {
     notify-send "🎙️ Trani" "Grabación iniciada: $title"
 }
 
-unload_audio_modules() {
-    pactl unload-module "$(cat "$LOOP_SYS_MODULE_ID_FILE")" 2>/dev/null || true
-    pactl unload-module "$(cat "$LOOP_MIC_MODULE_ID_FILE")" 2>/dev/null || true
-    pactl unload-module "$(cat "$SINK_MODULE_ID_FILE")" 2>/dev/null || true
-}
-
 stop_audio_recording() {
-    if [ -f "$RECORDING_PID_FILE" ]; then
-        kill "$(cat "$RECORDING_PID_FILE")" 2>/dev/null || true
+    [ -f "$RECORDING_PID_FILE" ] || return
+    local pid=$(cat "$RECORDING_PID_FILE")
+
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null || true
     fi
+
+    rm -f "$RECORDING_PID_FILE"
 }
 
 move_recording_to_session() {
@@ -376,10 +363,6 @@ delete_audio_file() {
 }
 
 clean_temp_files() {
-    rm -f "$RECORDING_PID_FILE"
-    rm -f "$SINK_MODULE_ID_FILE"
-    rm -f "$LOOP_MIC_MODULE_ID_FILE"
-    rm -f "$LOOP_SYS_MODULE_ID_FILE"
     rm -f "$SESSION_STATE_FILE"
 }
 
@@ -426,10 +409,7 @@ start_new_session() {
     create_session_directory "$session_path"
     save_session_state "$title" "$session_path" "$prompt_template" "$preserve_audio"
 
-    setup_audio_virtual_sink
-    setup_microphone_loopback
-    setup_system_audio_loopback
-    start_audio_recording
+    start_audio_recording "$TEMP_DIR/recording.wav" || exit 1
 
     notify_recording_started "$title"
 
@@ -457,11 +437,15 @@ stop_active_session() {
     preserve_audio=$(get_preserve_audio_from_state)
 
     stop_audio_recording
-    unload_audio_modules
 
     notify_processing_started
 
     move_recording_to_session "$session_path"
+
+    sox "$session_path/audio.wav" -r 16000 -c 1 /tmp/temp.wav \
+        norm -3 highpass 80 lowpass 8000
+    mv /tmp/temp.wav "$session_path/audio.wav"
+
     transcribe_audio_with_whisper "$session_path"
 
     if generate_summary_with_claude "$session_path" "$prompt_template"; then
