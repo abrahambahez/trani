@@ -374,9 +374,8 @@ func postProcessAudio(audioPath string) error {
 		"lowpass", "8000",
 	)
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("sox processing failed: %w\nOutput: %s", err, string(output))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("sox processing failed: %w", err)
 	}
 
 	if err := os.Rename(tempPath, audioPath); err != nil {
