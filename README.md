@@ -52,9 +52,15 @@ transcription:
     language: es
 
 llm:
+  backend: claude  # or "ollama" for local models
+
   claude:
     model: claude-sonnet-4-20250514
     max_tokens: 4000
+
+  ollama:
+    base_url: http://localhost:11434
+    model: llama3.2
 
 paths:
   sessions_dir: ~/.config/trani/sessions
@@ -161,9 +167,18 @@ Shortcut: Super+T
 
 ### LLM Integration
 
-- **Provider**: Anthropic Claude
-- **Default model**: claude-sonnet-4-20250514
-- **Features**: Structured markdown summaries, action items, key data extraction
+**Claude (default)**:
+- Cloud-based API from Anthropic
+- High-quality structured summaries
+- Requires ANTHROPIC_API_KEY environment variable
+- Default model: claude-sonnet-4-20250514
+
+**Ollama**:
+- Local model inference
+- No API costs
+- Privacy-focused
+- Requires Ollama running locally
+- Compatible with llama3.2, mistral, and other models
 
 ## Build from Source
 

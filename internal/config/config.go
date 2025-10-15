@@ -40,13 +40,21 @@ type OpenAIConfig struct {
 
 // LLMConfig contains settings for LLM providers.
 type LLMConfig struct {
-	Claude ClaudeConfig `yaml:"claude"`
+	Backend string        `yaml:"backend"`
+	Claude  ClaudeConfig  `yaml:"claude"`
+	Ollama  OllamaConfig  `yaml:"ollama"`
 }
 
 // ClaudeConfig contains settings for Claude API.
 type ClaudeConfig struct {
 	Model     string `yaml:"model"`
 	MaxTokens int    `yaml:"max_tokens"`
+}
+
+// OllamaConfig contains settings for Ollama API.
+type OllamaConfig struct {
+	BaseURL string `yaml:"base_url"`
+	Model   string `yaml:"model"`
 }
 
 // AudioConfig contains audio recording settings.
@@ -120,5 +128,12 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Paths.PromptsDir == "" {
 		c.Paths.PromptsDir = filepath.Join(configDir, "prompts")
+	}
+
+	if c.LLM.Backend == "" {
+		c.LLM.Backend = "claude"
+	}
+	if c.LLM.Ollama.BaseURL == "" {
+		c.LLM.Ollama.BaseURL = "http://localhost:11434"
 	}
 }

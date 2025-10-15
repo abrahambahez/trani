@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/sabhz/trani/internal/config"
 )
@@ -19,14 +20,18 @@ type Claude struct {
 	client    *http.Client
 }
 
-// New creates a new Claude API client.
-func New(cfg config.ClaudeConfig, apiKey string) *Claude {
+func NewClaude(cfg config.ClaudeConfig) (Generator, error) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	}
+
 	return &Claude{
 		apiKey:    apiKey,
 		model:     cfg.Model,
 		maxTokens: cfg.MaxTokens,
 		client:    &http.Client{},
-	}
+	}, nil
 }
 
 // claudeRequest represents the request body for Claude API.

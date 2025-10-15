@@ -95,7 +95,7 @@ type Session struct {
 
 	recorder    *audio.Recorder
 	transcriber transcribe.Transcriber
-	llm         *llm.Claude
+	llm         llm.Generator
 	notifier    *notify.Notifier
 	cfg         *config.Config
 }
@@ -127,11 +127,10 @@ func New(title, promptTemplate string, preserveAudio bool, cfg *config.Config) (
 
 	recorder := audio.New(cfg.Audio, cfg.Paths.TempDir)
 
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	llmClient, err := llm.New(cfg.LLM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize LLM: %w", err)
 	}
-	claudeClient := llm.New(cfg.LLM.Claude, apiKey)
 
 	notifier := notify.New()
 
@@ -143,7 +142,7 @@ func New(title, promptTemplate string, preserveAudio bool, cfg *config.Config) (
 		startedAt:      time.Now(),
 		recorder:       recorder,
 		transcriber:    transcriber,
-		llm:            claudeClient,
+		llm:            llmClient,
 		notifier:       notifier,
 		cfg:            cfg,
 	}, nil
