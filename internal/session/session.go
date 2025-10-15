@@ -17,74 +17,6 @@ import (
 	"github.com/sabhz/trani/pkg/notify"
 )
 
-const hardcodedPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
-
-TRANSCRIPCIÓN:
-{{TRANSCRIPTION}}
-
-NOTAS DEL USUARIO:
-{{NOTES}}
-
-Genera un documento markdown estructurado con:
-
-1. RESUMEN EJECUTIVO (2-3 párrafos)
-   - Contexto general de la sesión
-   - Puntos clave discutidos
-   - Conclusiones principales
-
-2. DETALLES POR TEMA
-   Usa los temas de las notas del usuario como estructura.
-   Para cada tema identifica en la transcripción:
-   - Detalles específicos mencionados
-   - Datos, fechas, números relevantes
-   - Procesos o procedimientos descritos
-   - Decisiones tomadas
-   - Contexto adicional importante
-
-3. ACCIONES Y PENDIENTES
-   - Action items identificados
-   - Responsables (si se mencionan)
-   - Fechas límite (si se mencionan)
-
-4. DATOS IMPORTANTES
-   - Fechas clave mencionadas
-   - Números, métricas, estadísticas
-   - Nombres de personas referenciadas
-   - Documentos, sistemas o herramientas mencionadas
-
-Mantén el formato limpio y profesional. Usa encabezados claros.`
-
-const hardcodedPromptNoNotes = `Tienes la transcripción de una sesión. Analízala y genera un documento estructurado.
-
-TRANSCRIPCIÓN:
-{{TRANSCRIPTION}}
-
-Genera un documento markdown con:
-
-1. RESUMEN EJECUTIVO (2-3 párrafos)
-   - Tema principal de la sesión
-   - Puntos clave discutidos
-   - Conclusiones principales
-
-2. TEMAS PRINCIPALES
-   Identifica los temas principales discutidos y para cada uno incluye:
-   - Contexto y detalles
-   - Puntos específicos mencionados
-   - Decisiones o conclusiones
-
-3. ACCIONES Y PENDIENTES
-   - Action items identificados
-   - Responsables (si se mencionan)
-   - Fechas límite (si se mencionan)
-
-4. DATOS IMPORTANTES
-   - Fechas mencionadas
-   - Números, métricas
-   - Nombres de personas
-   - Referencias a documentos/sistemas
-
-Mantén el formato limpio y profesional.`
-
 // Session represents an active recording session.
 type Session struct {
 	title          string
@@ -130,6 +62,10 @@ func New(title, promptTemplate string, preserveAudio bool, cfg *config.Config) (
 	llmClient, err := llm.New(cfg.LLM)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize LLM: %w", err)
+	}
+
+	if err := ensureDefaultPrompts(cfg.Paths.PromptsDir); err != nil {
+		return nil, fmt.Errorf("failed to initialize prompts: %w", err)
 	}
 
 	notifier := notify.New()
@@ -236,6 +172,96 @@ func (s *Session) ClearState() error {
 	return nil
 }
 
+const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
+
+TRANSCRIPCIÓN:
+{{TRANSCRIPTION}}
+
+NOTAS DEL USUARIO:
+{{NOTES}}
+
+Genera un documento markdown estructurado con:
+
+1. RESUMEN EJECUTIVO (2-3 párrafos)
+   - Contexto general de la sesión
+   - Puntos clave discutidos
+   - Conclusiones principales
+
+2. DETALLES POR TEMA
+   Usa los temas de las notas del usuario como estructura.
+   Para cada tema identifica en la transcripción:
+   - Detalles específicos mencionados
+   - Datos, fechas, números relevantes
+   - Procesos o procedimientos descritos
+   - Decisiones tomadas
+   - Contexto adicional importante
+
+3. ACCIONES Y PENDIENTES
+   - Action items identificados
+   - Responsables (si se mencionan)
+   - Fechas límite (si se mencionan)
+
+4. DATOS IMPORTANTES
+   - Fechas clave mencionadas
+   - Números, métricas, estadísticas
+   - Nombres de personas referenciadas
+   - Documentos, sistemas o herramientas mencionadas
+
+Mantén el formato limpio y profesional. Usa encabezados claros.`
+
+const defaultPromptNoNotes = `Tienes la transcripción de una sesión. Analízala y genera un documento estructurado.
+
+TRANSCRIPCIÓN:
+{{TRANSCRIPTION}}
+
+Genera un documento markdown con:
+
+1. RESUMEN EJECUTIVO (2-3 párrafos)
+   - Tema principal de la sesión
+   - Puntos clave discutidos
+   - Conclusiones principales
+
+2. TEMAS PRINCIPALES
+   Identifica los temas principales discutidos y para cada uno incluye:
+   - Contexto y detalles
+   - Puntos específicos mencionados
+   - Decisiones o conclusiones
+
+3. ACCIONES Y PENDIENTES
+   - Action items identificados
+   - Responsables (si se mencionan)
+   - Fechas límite (si se mencionan)
+
+4. DATOS IMPORTANTES
+   - Fechas mencionadas
+   - Números, métricas
+   - Nombres de personas
+   - Referencias a documentos/sistemas
+
+Mantén el formato limpio y profesional.`
+
+func ensureDefaultPrompts(promptsDir string) error {
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create prompts directory: %w", err)
+	}
+
+	defaultPath := filepath.Join(promptsDir, "default.txt")
+	if _, err := os.Stat(defaultPath); os.IsNotExist(err) {
+		if err := os.WriteFile(defaultPath, []byte(defaultPromptWithNotes), 0644); err != nil {
+			return fmt.Errorf("failed to write default.txt: %w", err)
+		}
+	}
+
+	defaultNoNotesPath := filepath.Join(promptsDir, "default_no_notes.txt")
+	if _, err := os.Stat(defaultNoNotesPath); os.IsNotExist(err) {
+		if err := os.WriteFile(defaultNoNotesPath, []byte(defaultPromptNoNotes), 0644); err != nil {
+			return fmt.Errorf("failed to write default_no_notes.txt: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // LoadActive restores a session from current_session.json.
 func LoadActive(cfg *config.Config) (*Session, error) {
 	statePath := filepath.Join(cfg.Paths.TempDir, "current_session.json")
@@ -268,9 +294,6 @@ func LoadActive(cfg *config.Config) (*Session, error) {
 	return session, nil
 }
 
-// loadPromptTemplate loads a prompt template from the prompts directory.
-// If hasNotes is true, looks for {template}.txt, otherwise {template}_no_notes.txt.
-// Returns hardcoded fallback if file doesn't exist.
 func (s *Session) loadPromptTemplate(hasNotes bool) string {
 	suffix := ".txt"
 	if !hasNotes {
@@ -282,10 +305,12 @@ func (s *Session) loadPromptTemplate(hasNotes bool) string {
 
 	content, err := os.ReadFile(promptPath)
 	if err != nil {
-		if hasNotes {
-			return hardcodedPromptWithNotes
+		defaultFilename := "default" + suffix
+		defaultPath := filepath.Join(s.cfg.Paths.PromptsDir, defaultFilename)
+		content, err = os.ReadFile(defaultPath)
+		if err != nil {
+			return "Error: No se pudo cargar la plantilla de prompt. Verifica la configuración."
 		}
-		return hardcodedPromptNoNotes
 	}
 
 	return string(content)
