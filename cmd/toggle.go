@@ -14,9 +14,9 @@ var (
 )
 
 var toggleCmd = &cobra.Command{
-	Use:   "toggle [title]",
+	Use:   "toggle",
 	Short: "Toggle recording session (start if inactive, stop if active)",
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -31,12 +31,7 @@ var toggleCmd = &cobra.Command{
 			return sess.Stop(context.Background())
 		}
 
-		title := ""
-		if len(args) > 0 {
-			title = args[0]
-		}
-
-		sess, err = session.New(title, togglePrompt, togglePreserveAudio, cfg)
+		sess, err = session.New(togglePrompt, togglePreserveAudio, cfg)
 		if err != nil {
 			return err
 		}

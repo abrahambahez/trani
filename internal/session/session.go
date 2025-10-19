@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,14 +44,9 @@ type State struct {
 }
 
 // New creates a new session with the given parameters.
-// If title is empty, generates a default title in format "sesion_HH-MM".
-func New(title, promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
-	if title == "" {
-		title = fmt.Sprintf("sesion_%s", time.Now().Format("15-04"))
-	}
-
-	datePrefix := time.Now().Format("2006-01-02")
-	sessionPath := filepath.Join(cfg.Paths.SessionsDir, fmt.Sprintf("%s-%s", datePrefix, title))
+func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
+	timestamp := time.Now().Format("20060102-1504")
+	sessionPath := filepath.Join(cfg.Paths.SessionsDir, timestamp)
 
 	transcriber, err := transcribe.New(cfg.Transcription)
 	if err != nil {
@@ -71,7 +67,7 @@ func New(title, promptTemplate string, preserveAudio bool, cfg *config.Config) (
 	notifier := notify.New()
 
 	return &Session{
-		title:          title,
+		title:          timestamp,
 		path:           sessionPath,
 		promptTemplate: promptTemplate,
 		preserveAudio:  preserveAudio,
@@ -130,6 +126,16 @@ func (s *Session) Start(ctx context.Context) error {
 	if err := cmd.Run(); err != nil {
 		s.recorder.Stop()
 		return fmt.Errorf("editor exited with error: %w", err)
+	}
+
+	if err := s.extractAndRenameIfNeeded(); err != nil {
+		s.recorder.Stop()
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+
+	if err := s.SaveState(); err != nil {
+		s.recorder.Stop()
+		return fmt.Errorf("failed to save session state: %w", err)
 	}
 
 	return s.Stop(ctx)
@@ -283,11 +289,12 @@ func LoadActive(cfg *config.Config) (*Session, error) {
 		return nil, fmt.Errorf("no active session found")
 	}
 
-	session, err := New(state.Title, state.PromptTemplate, state.PreserveAudio, cfg)
+	session, err := New(state.PromptTemplate, state.PreserveAudio, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reconstruct session: %w", err)
 	}
 
+	session.title = state.Title
 	session.startedAt = state.StartedAt
 	session.path = state.Path
 
@@ -421,6 +428,74 @@ func (s *Session) cleanupAudio() error {
 		return fmt.Errorf("failed to remove audio file: %w", err)
 	}
 
+	return nil
+}
+
+func slugify(text string) string {
+	slug := strings.ToLower(text)
+	slug = strings.ReplaceAll(slug, " ", "-")
+
+	specialCharsRegex := regexp.MustCompile(`[^a-z0-9-]+`)
+	slug = specialCharsRegex.ReplaceAllString(slug, "")
+
+	multiHyphenRegex := regexp.MustCompile(`-+`)
+	slug = multiHyphenRegex.ReplaceAllString(slug, "-")
+
+	slug = strings.Trim(slug, "-")
+
+	if len(slug) > 50 {
+		runes := []rune(slug)
+		if len(runes) > 50 {
+			slug = string(runes[:50])
+		}
+	}
+
+	slug = strings.Trim(slug, "-")
+
+	return slug
+}
+
+func (s *Session) extractAndRenameIfNeeded() error {
+	notesPath := filepath.Join(s.path, "notas.md")
+
+	content, err := os.ReadFile(notesPath)
+	if err != nil {
+		return nil
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+
+	firstLine := lines[0]
+	if !strings.HasPrefix(firstLine, "# ") {
+		return nil
+	}
+
+	heading := strings.TrimPrefix(firstLine, "# ")
+	heading = strings.TrimSpace(heading)
+
+	if heading == "" {
+		return nil
+	}
+
+	slug := slugify(heading)
+	if slug == "" {
+		return nil
+	}
+
+	timestamp := filepath.Base(s.path)
+	newDirName := fmt.Sprintf("%s-%s", timestamp, slug)
+	newPath := filepath.Join(filepath.Dir(s.path), newDirName)
+
+	if err := os.Rename(s.path, newPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to rename session directory: %v\n", err)
+		return nil
+	}
+
+	s.path = newPath
+	s.title = newDirName
 	return nil
 }
 

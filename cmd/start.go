@@ -14,9 +14,9 @@ var (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start [title]",
+	Use:   "start",
 	Short: "Start a new recording session",
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -26,12 +26,7 @@ var startCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		title := ""
-		if len(args) > 0 {
-			title = args[0]
-		}
-
-		sess, err := session.New(title, startPrompt, startPreserveAudio, cfg)
+		sess, err := session.New(startPrompt, startPreserveAudio, cfg)
 		if err != nil {
 			return err
 		}

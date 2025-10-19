@@ -97,8 +97,15 @@ trani stop
 trani toggle "meeting-title"
 ```
 
+**Process existing audio:**
+```bash
+trani process audio.wav
+trani process audio.wav --notes notes.md --title "meeting-summary"
+```
+
 ### Command Options
 
+**start/toggle:**
 ```bash
 trani start [title] --prompt TEMPLATE --preserve-audio
 trani toggle [title] --prompt TEMPLATE --preserve-audio
@@ -106,6 +113,16 @@ trani toggle [title] --prompt TEMPLATE --preserve-audio
 
 - `--prompt`: Use custom prompt template (default: "default")
 - `--preserve-audio`: Keep audio file after processing
+
+**process:**
+```bash
+trani process <audio-file> --notes FILE --title NAME --prompt TEMPLATE
+```
+
+- `<audio-file>`: Path to audio file to process (required)
+- `--notes`: Path to notes file to include in summary
+- `--title`: Output directory title (defaults to audio filename)
+- `--prompt`: Use custom prompt template (default: "default")
 
 ### Output Structure
 
