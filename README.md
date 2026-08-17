@@ -4,16 +4,17 @@ A streamlined tool for recording, transcribing, and summarizing audio sessions w
 
 ## Overview
 
-Trani captures system and microphone audio, transcribes it using Whisper (local or OpenAI), and generates structured summaries through Claude AI. Designed for professionals who need accurate meeting documentation with minimal overhead.
+Trani captures microphone and/or system audio, transcribes it progressively while the session is still running, and generates a structured summary through an LLM. Sessions default to a note in an Obsidian vault (falling back to nvim if no vault is configured); most of the transcription happens in the background while you're still in the meeting, not all at once afterward.
 
 ## Features
 
-- **Dual transcription backends**: Local whisper.cpp or OpenAI Whisper API
-- **High-quality audio capture**: Direct PipeWire monitor recording with post-processing
-- **AI-powered summaries**: Claude API integration with customizable prompts
-- **Note-driven workflow**: Take notes during recording for contextual summaries
-- **Session management**: Organized output with timestamps and titles
-- **Flexible commands**: Start, stop, or toggle recording with keyboard shortcuts
+- **Mic or mic + system capture**: record just the microphone (dictation-style sessions) or the microphone together with system output (meetings), as two independent direct streams, never through a virtual sink
+- **Progressive, chunked transcription**: audio is segmented and transcribed while the session is live, not all at once when it stops
+- **Dual transcription backends**: local whisper.cpp or OpenAI Whisper API
+- **AI-powered summaries**: pluggable LLM backend (Claude or Ollama) with customizable prompts
+- **Obsidian-first, nvim fallback**: notes open in your Obsidian vault by default; with no vault configured, nvim works exactly as before
+- **Concurrent-safe sessions**: starting a new session doesn't wait for the previous one's summary to finish generating
+- **Flexible commands**: start, stop, or toggle recording with keyboard shortcuts
 
 ## Installation
 
@@ -21,15 +22,21 @@ Trani captures system and microphone audio, transcribes it using Whisper (local 
 
 ```bash
 # Fedora/RHEL
-sudo dnf install pipewire pipewire-pulse pipewire-utils sox
+sudo dnf install pipewire pipewire-pulse pipewire-utils sox ffmpeg
 
 # Ubuntu/Debian
-sudo apt install pipewire pipewire-pulse pipewire-audio-client-utils sox
+sudo apt install pipewire pipewire-pulse pipewire-audio-client-utils sox ffmpeg
 ```
+
+Optional, for the default Obsidian-integrated flow:
+- [obsidian-cli](https://github.com/Yakitrak/obsidian-cli) installed and on `PATH`
+- Obsidian running with the target vault open (trani degrades gracefully — logs a warning and keeps going — if it isn't)
+
+Without `obsidian.vault_path` configured, sessions use `nvim` exactly like before and none of the above is required.
 
 ### Setup
 
-1. **Download binary** (or build from source)
+1. **Download binary** (or build from source, see below)
 2. **Configure API keys**:
 ```bash
 export ANTHROPIC_API_KEY="your-claude-api-key"
@@ -62,8 +69,18 @@ llm:
     base_url: http://localhost:11434
     model: llama3.2
 
+audio:
+  mode: mic_system        # mic | mic_system
+  mic_device: ""           # pactl source name; empty uses the default source
+  mix_strategy: post_mix   # post_mix | separate_transcribe (mic_system only)
+  chunk_seconds: 300       # how often to segment and transcribe progressively
+
+obsidian:
+  vault_path: ~/vault      # empty = fall back to nvim
+  cli_path: obsidian
+
 paths:
-  sessions_dir: ~/.config/trani/sessions
+  sessions_dir: ~/vault/sessions  # must live inside vault_path if obsidian is configured
   temp_dir: ~/.config/trani/temp
   prompts_dir: ~/.config/trani/prompts
 ```
@@ -72,29 +89,24 @@ paths:
 
 ### Basic Workflow
 
-**Start a session:**
+**Toggle recording:**
 ```bash
-trani start "meeting-title"
+trani toggle
 ```
 
-This will:
-1. Begin audio recording
-2. Open Neovim for note-taking
-3. Upon closing Neovim:
-   - Stop recording
-   - Process audio (normalize, filter)
-   - Transcribe content
-   - Generate AI summary
-   - Save results
+With `obsidian.vault_path` configured:
+1. Starts recording in the background and returns immediately
+2. Opens the session note in Obsidian
+3. Audio is segmented and transcribed progressively as the session runs
+4. Take notes in the note Obsidian opened
+5. Run `trani toggle` (or `trani stop`) again to stop: recording stops, the note is renamed from its heading if it has one, and a summary is generated and written into the same note
+6. A new `trani toggle` can be run immediately, even while the previous session's summary is still being generated
+
+With no vault configured, this works the same way but blocks in the foreground with `nvim` open (like the original workflow): closing nvim stops the recording.
 
 **Manual stop:**
 ```bash
 trani stop
-```
-
-**Toggle recording:**
-```bash
-trani toggle "meeting-title"
 ```
 
 **Process existing audio:**
@@ -107,12 +119,12 @@ trani process audio.wav --notes notes.md --title "meeting-summary"
 
 **start/toggle:**
 ```bash
-trani start [title] --prompt TEMPLATE --preserve-audio
-trani toggle [title] --prompt TEMPLATE --preserve-audio
+trani start --prompt TEMPLATE --preserve-audio
+trani toggle --prompt TEMPLATE --preserve-audio
 ```
 
 - `--prompt`: Use custom prompt template (default: "default")
-- `--preserve-audio`: Keep audio file after processing
+- `--preserve-audio`: Keep the archived audio in `.sources/` after processing
 
 **process:**
 ```bash
@@ -124,14 +136,24 @@ trani process <audio-file> --notes FILE --title NAME --prompt TEMPLATE
 - `--title`: Output directory title (defaults to audio filename)
 - `--prompt`: Use custom prompt template (default: "default")
 
+`process` is a standalone, one-shot command for reprocessing an existing recording — it isn't part of the live session flow above, and keeps producing its own directory with a separate `resumen.md`.
+
 ### Output Structure
 
+Sessions:
 ```
-~/.config/trani/sessions/2025-10-11-meeting-title/
+<sessions_dir>/2026-01-15-143022-meeting-title.md   # notes + final summary, same file
+<sessions_dir>/.sources/2026-01-15-143022.txt        # accumulated raw transcript
+<sessions_dir>/.sources/2026-01-15-143022.wav        # archived audio (deleted unless --preserve-audio)
+```
+
+`process`:
+```
+<sessions_dir>/2026-01-15-143022/
 ├── transcripcion.txt  # Full transcription
-├── notas.md          # User notes
-├── resumen.md        # AI-generated summary
-└── audio.wav         # (optional, with --preserve-audio)
+├── notas.md           # User notes
+├── resumen.md          # AI-generated summary
+└── audio.wav           # (optional, with --preserve-audio)
 ```
 
 ## Advanced Features
@@ -161,12 +183,14 @@ Shortcut: Super+T
 
 ### Audio Processing Pipeline
 
-1. **Capture**: Direct monitor source at 48kHz stereo
-2. **Post-processing**:
+1. **Capture**: mic and, in `mic_system` mode, the system output monitor, as two independent direct streams (never mixed through a virtual sink — see `docs/ADR/001-audio-strategy.md`), segmented into `audio.chunk_seconds` chunks via ffmpeg
+2. **Per-chunk post-processing** (sox):
    - Downsample to 16kHz mono (optimal for Whisper)
    - Normalize to 0dB (maximum safe volume)
    - High-pass filter at 80Hz (remove rumble)
    - Low-pass filter at 8kHz (remove high-frequency noise)
+3. **`mic_system` combination**: both streams are normalized independently before being combined, per `audio.mix_strategy` (see `docs/ADR/002-progressive-sessions.md`)
+4. **Progressive transcription**: each chunk is transcribed as it closes and appended to `.sources/<timestamp>.txt`; consecutive duplicate lines (a common Whisper hallucination) are dropped before the transcript goes into the summary prompt
 
 ### Transcription Backends
 
@@ -212,7 +236,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o trani
 
 ## Troubleshooting
 
-**Low audio volume**: Ensure PipeWire is properly configured and sox is installed.
+**Low audio volume**: Ensure PipeWire is properly configured and sox is installed. If using `mic_system`, check that the current default sink/source is actually carrying signal (`pactl list short sinks`/`sources`) — a suspended or unused device can silently produce empty captures.
 
 **Transcription errors**: Check API keys and network connectivity for OpenAI backend.
 
@@ -221,9 +245,13 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o trani
 systemctl --user status pipewire pipewire-pulse
 ```
 
+**Note doesn't open in Obsidian**: trani logs a warning and keeps recording regardless — check that Obsidian is running with the configured vault open, and that `obsidian.cli_path` points at a working `obsidian-cli` binary.
+
+**"session already active" but nothing seems to be recording**: check for a stale lock at `<temp_dir>/active_recording.json`; if its PID isn't running anymore, trani clears it automatically on the next command.
+
 ## Configuration Reference
 
-See `docs/PRD/001-trani-go.md` for complete configuration options and architecture details.
+See `docs/PRD/001-trani-go.md` and `docs/ADR/` for architecture decisions and rationale behind the audio capture and session design.
 
 ## License
 
