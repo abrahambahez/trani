@@ -172,10 +172,17 @@ func (s *Session) finishRecording() error {
 		return fmt.Errorf("failed to stop recording: %w", err)
 	}
 
-	recordingPath := s.recorder.RecordingPath()
-	audioPath := filepath.Join(s.path, "audio.wav")
-	if err := os.Rename(recordingPath, audioPath); err != nil {
-		return fmt.Errorf("failed to move audio file: %w", err)
+	if s.recorder.HasSystemAudio() {
+		if err := os.Rename(s.recorder.MicPath(), filepath.Join(s.path, "audio-mic.wav")); err != nil {
+			return fmt.Errorf("failed to move microphone audio file: %w", err)
+		}
+		if err := os.Rename(s.recorder.SystemPath(), filepath.Join(s.path, "audio-system.wav")); err != nil {
+			return fmt.Errorf("failed to move system audio file: %w", err)
+		}
+	} else {
+		if err := os.Rename(s.recorder.MicPath(), filepath.Join(s.path, "audio.wav")); err != nil {
+			return fmt.Errorf("failed to move audio file: %w", err)
+		}
 	}
 
 	if err := ClearLock(s.cfg); err != nil {
@@ -288,24 +295,20 @@ func fillPromptTemplate(template, transcription, notes string) string {
 	return result
 }
 
+// runSox invokes sox with the given arguments.
+func runSox(args ...string) error {
+	if err := exec.CommandContext(context.Background(), "sox", args...).Run(); err != nil {
+		return fmt.Errorf("sox failed: %w", err)
+	}
+	return nil
+}
+
 // postProcessAudio downsample to 16kHz mono and normalize audio.
 func postProcessAudio(audioPath string) error {
 	tempPath := audioPath + ".tmp.wav"
 
-	cmd := exec.CommandContext(
-		context.Background(),
-		"sox",
-		audioPath,
-		"-r", "16000",
-		"-c", "1",
-		tempPath,
-		"norm",
-		"highpass", "80",
-		"lowpass", "8000",
-	)
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sox processing failed: %w", err)
+	if err := runSox(audioPath, "-r", "16000", "-c", "1", tempPath, "norm", "highpass", "80", "lowpass", "8000"); err != nil {
+		return err
 	}
 
 	if err := os.Rename(tempPath, audioPath); err != nil {

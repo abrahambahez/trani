@@ -57,10 +57,25 @@ type OllamaConfig struct {
 	Model   string `yaml:"model"`
 }
 
+// Audio capture modes.
+const (
+	AudioModeMic       = "mic"
+	AudioModeMicSystem = "mic_system"
+)
+
+// Strategies for combining mic and system audio in mic_system mode.
+const (
+	MixStrategyPostMix            = "post_mix"
+	MixStrategySeparateTranscribe = "separate_transcribe"
+)
+
 // AudioConfig contains audio recording settings.
 type AudioConfig struct {
-	SampleRate int `yaml:"sample_rate"`
-	Channels   int `yaml:"channels"`
+	SampleRate  int    `yaml:"sample_rate"`
+	Channels    int    `yaml:"channels"`
+	Mode        string `yaml:"mode"`         // mic | mic_system
+	MicDevice   string `yaml:"mic_device"`   // pactl source name; empty uses the default source
+	MixStrategy string `yaml:"mix_strategy"` // post_mix | separate_transcribe (mic_system only)
 }
 
 // PathsConfig contains file system paths.
@@ -128,6 +143,13 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Paths.PromptsDir == "" {
 		c.Paths.PromptsDir = filepath.Join(configDir, "prompts")
+	}
+
+	if c.Audio.Mode == "" {
+		c.Audio.Mode = AudioModeMic
+	}
+	if c.Audio.MixStrategy == "" {
+		c.Audio.MixStrategy = MixStrategyPostMix
 	}
 
 	if c.LLM.Backend == "" {

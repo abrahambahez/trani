@@ -22,7 +22,7 @@ func SpawnPostprocess(sessionPath, promptTemplate string, preserveAudio bool, no
 		"__postprocess-worker",
 		"--session-path", sessionPath,
 		"--prompt", promptTemplate,
-		"--preserve-audio", strconv.FormatBool(preserveAudio),
+		"--preserve-audio=" + strconv.FormatBool(preserveAudio),
 	}
 	if notifyID != "" {
 		args = append(args, "--notify-id", notifyID)
