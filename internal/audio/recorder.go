@@ -16,13 +16,18 @@ import (
 // the system output monitor), never through a virtual sink. Mixing virtual
 // sinks with loopbacks was tried and rejected (see docs/ADR/001), it
 // produced near-silent audio that caused transcription hallucinations.
+//
+// Each stream is segmented into fixed-length chunks by ffmpeg as it
+// records, so a chunker can pick up and transcribe finished segments
+// progressively instead of waiting for the whole session to end.
 type Recorder struct {
-	tempDir   string
-	mode      string
-	micDevice string
+	tempDir      string
+	mode         string
+	micDevice    string
+	chunkSeconds int
 
-	micPID    int
-	systemPID int
+	micCmd    *exec.Cmd
+	systemCmd *exec.Cmd
 }
 
 func New(cfg config.AudioConfig, tempDir string) *Recorder {
@@ -31,10 +36,16 @@ func New(cfg config.AudioConfig, tempDir string) *Recorder {
 		mode = config.AudioModeMic
 	}
 
+	chunkSeconds := cfg.ChunkSeconds
+	if chunkSeconds == 0 {
+		chunkSeconds = 300
+	}
+
 	return &Recorder{
-		tempDir:   tempDir,
-		mode:      mode,
-		micDevice: cfg.MicDevice,
+		tempDir:      tempDir,
+		mode:         mode,
+		micDevice:    cfg.MicDevice,
+		chunkSeconds: chunkSeconds,
 	}
 }
 
@@ -43,14 +54,26 @@ func (r *Recorder) HasSystemAudio() bool {
 	return r.mode == config.AudioModeMicSystem
 }
 
-// MicPath returns the temp path for the raw microphone recording.
-func (r *Recorder) MicPath() string {
-	return filepath.Join(r.tempDir, "recording-mic.wav")
+// MicChunkPattern is the ffmpeg segment output pattern for mic chunks.
+func (r *Recorder) MicChunkPattern() string {
+	return filepath.Join(r.tempDir, "chunk-mic-%03d.wav")
 }
 
-// SystemPath returns the temp path for the raw system output recording.
-func (r *Recorder) SystemPath() string {
-	return filepath.Join(r.tempDir, "recording-system.wav")
+// MicSegmentList is the path ffmpeg appends a line to every time it closes
+// a mic chunk.
+func (r *Recorder) MicSegmentList() string {
+	return filepath.Join(r.tempDir, "chunk-mic-segments.txt")
+}
+
+// SystemChunkPattern is the ffmpeg segment output pattern for system chunks.
+func (r *Recorder) SystemChunkPattern() string {
+	return filepath.Join(r.tempDir, "chunk-system-%03d.wav")
+}
+
+// SystemSegmentList is the path ffmpeg appends a line to every time it
+// closes a system audio chunk.
+func (r *Recorder) SystemSegmentList() string {
+	return filepath.Join(r.tempDir, "chunk-system-segments.txt")
 }
 
 func activeMonitorSource() (string, error) {
@@ -85,14 +108,20 @@ func activeMicSource(override string) (string, error) {
 	return source, nil
 }
 
-func startPwRecord(ctx context.Context, target, outputPath string) (*exec.Cmd, error) {
+func startSegmentedCapture(ctx context.Context, source string, chunkSeconds int, segmentList, pattern string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(
 		ctx,
-		"pw-record",
-		"--target", target,
-		"--rate", "48000",
-		"--channels", "2",
-		outputPath,
+		"ffmpeg",
+		"-hide_banner", "-loglevel", "warning",
+		"-f", "pulse", "-i", source,
+		"-ar", "48000", "-ac", "2", "-acodec", "pcm_s16le",
+		"-f", "segment",
+		"-segment_time", fmt.Sprintf("%d", chunkSeconds),
+		"-reset_timestamps", "1",
+		"-segment_list", segmentList,
+		"-segment_list_type", "flat",
+		"-y",
+		pattern,
 	)
 
 	if err := cmd.Start(); err != nil {
@@ -103,18 +132,21 @@ func startPwRecord(ctx context.Context, target, outputPath string) (*exec.Cmd, e
 }
 
 // Start begins capturing the microphone and, in mic_system mode, the system
-// output monitor in parallel, as two independent direct streams.
+// output monitor in parallel, as two independent direct streams segmented
+// into chunks.
 func (r *Recorder) Start(ctx context.Context) error {
 	micSource, err := activeMicSource(r.micDevice)
 	if err != nil {
 		return fmt.Errorf("failed to resolve microphone source: %w", err)
 	}
 
-	micCmd, err := startPwRecord(ctx, micSource, r.MicPath())
+	os.Remove(r.MicSegmentList())
+
+	micCmd, err := startSegmentedCapture(ctx, micSource, r.chunkSeconds, r.MicSegmentList(), r.MicChunkPattern())
 	if err != nil {
 		return fmt.Errorf("failed to start microphone recording: %w", err)
 	}
-	r.micPID = micCmd.Process.Pid
+	r.micCmd = micCmd
 
 	if !r.HasSystemAudio() {
 		return nil
@@ -122,49 +154,49 @@ func (r *Recorder) Start(ctx context.Context) error {
 
 	systemSource, err := activeMonitorSource()
 	if err != nil {
-		stopProcess(&r.micPID)
+		stopCmd(r.micCmd)
+		r.micCmd = nil
 		return fmt.Errorf("failed to resolve system output source: %w", err)
 	}
 
-	systemCmd, err := startPwRecord(ctx, systemSource, r.SystemPath())
+	os.Remove(r.SystemSegmentList())
+
+	systemCmd, err := startSegmentedCapture(ctx, systemSource, r.chunkSeconds, r.SystemSegmentList(), r.SystemChunkPattern())
 	if err != nil {
-		stopProcess(&r.micPID)
+		stopCmd(r.micCmd)
+		r.micCmd = nil
 		return fmt.Errorf("failed to start system output recording: %w", err)
 	}
-	r.systemPID = systemCmd.Process.Pid
+	r.systemCmd = systemCmd
 
 	return nil
 }
 
-// Stop stops any active recording streams.
+// Stop stops any active recording streams, letting ffmpeg finalize (and
+// list) whatever chunk was still open.
 func (r *Recorder) Stop() error {
-	if err := stopProcess(&r.micPID); err != nil {
+	if err := stopCmd(r.micCmd); err != nil {
 		return fmt.Errorf("failed to stop microphone recording: %w", err)
 	}
+	r.micCmd = nil
 
-	if err := stopProcess(&r.systemPID); err != nil {
+	if err := stopCmd(r.systemCmd); err != nil {
 		return fmt.Errorf("failed to stop system output recording: %w", err)
 	}
+	r.systemCmd = nil
 
 	return nil
 }
 
-func stopProcess(pid *int) error {
-	if *pid == 0 {
+func stopCmd(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
 
-	process, err := os.FindProcess(*pid)
-	if err != nil {
-		*pid = 0
-		return nil
-	}
-
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		return err
 	}
 
-	process.Wait()
-	*pid = 0
+	cmd.Wait()
 	return nil
 }

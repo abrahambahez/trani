@@ -12,6 +12,7 @@ import (
 
 var (
 	postprocessSessionPath   string
+	postprocessSourcesTitle  string
 	postprocessPrompt        string
 	postprocessPreserveAudio bool
 	postprocessNotifyID      string
@@ -35,6 +36,7 @@ var postprocessWorkerCmd = &cobra.Command{
 		err = session.RunPostprocessWorker(
 			context.Background(),
 			postprocessSessionPath,
+			postprocessSourcesTitle,
 			postprocessPrompt,
 			postprocessPreserveAudio,
 			postprocessNotifyID,
@@ -51,9 +53,11 @@ var postprocessWorkerCmd = &cobra.Command{
 
 func init() {
 	postprocessWorkerCmd.Flags().StringVar(&postprocessSessionPath, "session-path", "", "Path to the session directory")
+	postprocessWorkerCmd.Flags().StringVar(&postprocessSourcesTitle, "sources-title", "", "Original session timestamp, used to locate .sources/<title>.txt and .wav")
 	postprocessWorkerCmd.Flags().StringVar(&postprocessPrompt, "prompt", "default", "Prompt template name")
 	postprocessWorkerCmd.Flags().BoolVar(&postprocessPreserveAudio, "preserve-audio", false, "Keep audio file after processing")
 	postprocessWorkerCmd.Flags().StringVar(&postprocessNotifyID, "notify-id", "", "Notification ID to update on completion")
 	postprocessWorkerCmd.MarkFlagRequired("session-path")
+	postprocessWorkerCmd.MarkFlagRequired("sources-title")
 	rootCmd.AddCommand(postprocessWorkerCmd)
 }

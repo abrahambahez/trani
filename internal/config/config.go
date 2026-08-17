@@ -71,11 +71,12 @@ const (
 
 // AudioConfig contains audio recording settings.
 type AudioConfig struct {
-	SampleRate  int    `yaml:"sample_rate"`
-	Channels    int    `yaml:"channels"`
-	Mode        string `yaml:"mode"`         // mic | mic_system
-	MicDevice   string `yaml:"mic_device"`   // pactl source name; empty uses the default source
-	MixStrategy string `yaml:"mix_strategy"` // post_mix | separate_transcribe (mic_system only)
+	SampleRate   int    `yaml:"sample_rate"`
+	Channels     int    `yaml:"channels"`
+	Mode         string `yaml:"mode"`          // mic | mic_system
+	MicDevice    string `yaml:"mic_device"`    // pactl source name; empty uses the default source
+	MixStrategy  string `yaml:"mix_strategy"`  // post_mix | separate_transcribe (mic_system only)
+	ChunkSeconds int    `yaml:"chunk_seconds"` // how often to segment and transcribe progressively
 }
 
 // PathsConfig contains file system paths.
@@ -150,6 +151,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Audio.MixStrategy == "" {
 		c.Audio.MixStrategy = MixStrategyPostMix
+	}
+	if c.Audio.ChunkSeconds == 0 {
+		c.Audio.ChunkSeconds = 300
 	}
 
 	if c.LLM.Backend == "" {

@@ -29,23 +29,34 @@ func TestNewMicSystemMode(t *testing.T) {
 	}
 }
 
-func TestMicPath(t *testing.T) {
-	cfg := config.AudioConfig{Mode: config.AudioModeMic}
-	recorder := New(cfg, "/tmp/trani")
+func TestNewDefaultsChunkSeconds(t *testing.T) {
+	cfg := config.AudioConfig{}
+	recorder := New(cfg, "/tmp/test")
 
-	expected := "/tmp/trani/recording-mic.wav"
-	if path := recorder.MicPath(); path != expected {
-		t.Errorf("MicPath: expected %s, got %s", expected, path)
+	if recorder.chunkSeconds != 300 {
+		t.Errorf("expected default chunkSeconds 300, got %d", recorder.chunkSeconds)
 	}
 }
 
-func TestSystemPath(t *testing.T) {
+func TestChunkPatternsAndSegmentLists(t *testing.T) {
 	cfg := config.AudioConfig{Mode: config.AudioModeMicSystem}
 	recorder := New(cfg, "/tmp/trani")
 
-	expected := "/tmp/trani/recording-system.wav"
-	if path := recorder.SystemPath(); path != expected {
-		t.Errorf("SystemPath: expected %s, got %s", expected, path)
+	cases := []struct {
+		name     string
+		got      string
+		expected string
+	}{
+		{"MicChunkPattern", recorder.MicChunkPattern(), "/tmp/trani/chunk-mic-%03d.wav"},
+		{"MicSegmentList", recorder.MicSegmentList(), "/tmp/trani/chunk-mic-segments.txt"},
+		{"SystemChunkPattern", recorder.SystemChunkPattern(), "/tmp/trani/chunk-system-%03d.wav"},
+		{"SystemSegmentList", recorder.SystemSegmentList(), "/tmp/trani/chunk-system-segments.txt"},
+	}
+
+	for _, c := range cases {
+		if c.got != c.expected {
+			t.Errorf("%s: expected %s, got %s", c.name, c.expected, c.got)
+		}
 	}
 }
 
@@ -58,7 +69,7 @@ func TestStopWithoutStart(t *testing.T) {
 	}
 }
 
-func TestStopClearsRecordingPIDs(t *testing.T) {
+func TestStopClearsCommands(t *testing.T) {
 	cfg := config.AudioConfig{Mode: config.AudioModeMicSystem}
 	recorder := New(cfg, "/tmp/test")
 
@@ -66,22 +77,22 @@ func TestStopClearsRecordingPIDs(t *testing.T) {
 	if err := micProc.Start(); err != nil {
 		t.Fatalf("failed to start placeholder process: %v", err)
 	}
-	recorder.micPID = micProc.Process.Pid
+	recorder.micCmd = micProc
 
 	systemProc := exec.Command("sleep", "30")
 	if err := systemProc.Start(); err != nil {
 		t.Fatalf("failed to start placeholder process: %v", err)
 	}
-	recorder.systemPID = systemProc.Process.Pid
+	recorder.systemCmd = systemProc
 
 	if err := recorder.Stop(); err != nil {
 		t.Errorf("Stop() should not error, got: %v", err)
 	}
 
-	if recorder.micPID != 0 {
-		t.Errorf("micPID should be cleared, got: %d", recorder.micPID)
+	if recorder.micCmd != nil {
+		t.Error("micCmd should be cleared")
 	}
-	if recorder.systemPID != 0 {
-		t.Errorf("systemPID should be cleared, got: %d", recorder.systemPID)
+	if recorder.systemCmd != nil {
+		t.Error("systemCmd should be cleared")
 	}
 }

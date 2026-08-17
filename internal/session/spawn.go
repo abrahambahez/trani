@@ -12,7 +12,7 @@ import (
 // summarize, and finalize a session whose recording has already stopped.
 // It runs independently of the recording lock (already cleared by the
 // caller) so starting a new session does not wait for it to finish.
-func SpawnPostprocess(sessionPath, promptTemplate string, preserveAudio bool, notifyID string) error {
+func SpawnPostprocess(sessionPath, sourcesTitle, promptTemplate string, preserveAudio bool, notifyID string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to resolve trani executable: %w", err)
@@ -21,6 +21,7 @@ func SpawnPostprocess(sessionPath, promptTemplate string, preserveAudio bool, no
 	args := []string{
 		"__postprocess-worker",
 		"--session-path", sessionPath,
+		"--sources-title", sourcesTitle,
 		"--prompt", promptTemplate,
 		"--preserve-audio=" + strconv.FormatBool(preserveAudio),
 	}

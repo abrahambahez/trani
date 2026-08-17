@@ -22,6 +22,7 @@ import (
 // Session represents an active recording session.
 type Session struct {
 	title          string
+	sourcesTitle   string // stable original timestamp; title may be renamed from the notes heading
 	path           string
 	promptTemplate string
 	preserveAudio  bool
@@ -60,6 +61,7 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 
 	return &Session{
 		title:          timestamp,
+		sourcesTitle:   timestamp,
 		path:           sessionPath,
 		promptTemplate: promptTemplate,
 		preserveAudio:  preserveAudio,
@@ -103,6 +105,12 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
+	chunker, err := newChunker(s.cfg, s.sourcesTitle, s.recorder, s.transcriber)
+	if err != nil {
+		s.recorder.Stop()
+		return err
+	}
+
 	message := fmt.Sprintf("Grabación iniciada - %s", s.title)
 	notifyID, err := s.notifier.Start("🎙️ Trani", message)
 	if err != nil {
@@ -124,6 +132,17 @@ func (s *Session) Start(ctx context.Context) error {
 		return err
 	}
 
+	chunkerStop := make(chan struct{})
+	chunkerDone := make(chan struct{})
+	go func() {
+		defer close(chunkerDone)
+		chunker.run(ctx, chunkerStop)
+	}()
+	stopChunker := func() {
+		close(chunkerStop)
+		<-chunkerDone
+	}
+
 	notesPath := filepath.Join(s.path, "notas.md")
 	editorCmd := exec.CommandContext(ctx, "nvim", notesPath)
 	editorCmd.Stdin = os.Stdin
@@ -131,6 +150,7 @@ func (s *Session) Start(ctx context.Context) error {
 	editorCmd.Stderr = os.Stderr
 
 	if err := editorCmd.Start(); err != nil {
+		stopChunker()
 		s.recorder.Stop()
 		ClearLock(s.cfg)
 		return fmt.Errorf("failed to start editor: %w", err)
@@ -149,11 +169,14 @@ func (s *Session) Start(ctx context.Context) error {
 		<-editorDone
 	case err := <-editorDone:
 		if err != nil {
+			stopChunker()
 			s.recorder.Stop()
 			ClearLock(s.cfg)
 			return fmt.Errorf("editor exited with error: %w", err)
 		}
 	}
+
+	stopChunker()
 
 	if err := s.extractAndRenameIfNeeded(); err != nil {
 		s.recorder.Stop()
@@ -161,28 +184,20 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to rename session: %w", err)
 	}
 
-	return s.finishRecording()
+	return s.finishRecording(ctx, chunker)
 }
 
-// finishRecording stops the recorder, clears the recording lock so a new
-// session can start, and hands off transcription/summary to a detached
+// finishRecording stops the recorder, does one last pass to pick up
+// whatever chunk was still open, clears the recording lock so a new
+// session can start, and hands off summarization to a detached
 // post-processing worker.
-func (s *Session) finishRecording() error {
+func (s *Session) finishRecording(ctx context.Context, chunker *chunker) error {
 	if err := s.recorder.Stop(); err != nil {
 		return fmt.Errorf("failed to stop recording: %w", err)
 	}
 
-	if s.recorder.HasSystemAudio() {
-		if err := os.Rename(s.recorder.MicPath(), filepath.Join(s.path, "audio-mic.wav")); err != nil {
-			return fmt.Errorf("failed to move microphone audio file: %w", err)
-		}
-		if err := os.Rename(s.recorder.SystemPath(), filepath.Join(s.path, "audio-system.wav")); err != nil {
-			return fmt.Errorf("failed to move system audio file: %w", err)
-		}
-	} else {
-		if err := os.Rename(s.recorder.MicPath(), filepath.Join(s.path, "audio.wav")); err != nil {
-			return fmt.Errorf("failed to move audio file: %w", err)
-		}
+	if err := chunker.pollOnce(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "trani: chunk processing error: %v\n", err)
 	}
 
 	if err := ClearLock(s.cfg); err != nil {
@@ -195,7 +210,7 @@ func (s *Session) finishRecording() error {
 		s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
 	}
 
-	return SpawnPostprocess(s.path, s.promptTemplate, s.preserveAudio, s.notifyID)
+	return SpawnPostprocess(s.path, s.sourcesTitle, s.promptTemplate, s.preserveAudio, s.notifyID)
 }
 
 const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
@@ -297,8 +312,9 @@ func fillPromptTemplate(template, transcription, notes string) string {
 
 // runSox invokes sox with the given arguments.
 func runSox(args ...string) error {
-	if err := exec.CommandContext(context.Background(), "sox", args...).Run(); err != nil {
-		return fmt.Errorf("sox failed: %w", err)
+	output, err := exec.CommandContext(context.Background(), "sox", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sox failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
