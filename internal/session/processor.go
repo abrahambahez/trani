@@ -23,7 +23,7 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 		title = strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath))
 	}
 
-	timestamp := time.Now().Format("20060102-1504")
+	timestamp := time.Now().Format("20060102-150405")
 	sessionPath := filepath.Join(cfg.Paths.SessionsDir, timestamp)
 
 	if err := os.MkdirAll(sessionPath, 0755); err != nil {

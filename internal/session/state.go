@@ -29,8 +29,13 @@ func lockPath(cfg *config.Config) string {
 	return filepath.Join(cfg.Paths.TempDir, "active_recording.json")
 }
 
-// Save writes the lock to disk, creating the temp directory if needed.
-func (l *RecordingLock) Save(cfg *config.Config) error {
+// Acquire atomically creates the recording lock, failing if a live one
+// already exists. A plain read-then-write (check the lock, then save a new
+// one) has a race: two near-simultaneous invocations can both see no lock
+// and both proceed, and whichever writes last silently orphans the other's
+// recording (unreachable by title/PID and unstoppable through the CLI).
+// O_EXCL makes the creation itself atomic, so only one caller can ever win.
+func (l *RecordingLock) Acquire(cfg *config.Config) error {
 	data, err := json.MarshalIndent(l, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal recording lock: %w", err)
@@ -40,8 +45,51 @@ func (l *RecordingLock) Save(cfg *config.Config) error {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
+	path := lockPath(cfg)
+
+	// Retry once: the first attempt may lose to a genuinely stale lock
+	// (owning process no longer alive), which ReadLock clears on read.
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			_, writeErr := f.Write(data)
+			closeErr := f.Close()
+			if writeErr != nil {
+				return fmt.Errorf("failed to write recording lock: %w", writeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("failed to write recording lock: %w", closeErr)
+			}
+			return nil
+		}
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create recording lock: %w", err)
+		}
+
+		existing, readErr := ReadLock(cfg)
+		if readErr != nil {
+			return readErr
+		}
+		if existing != nil {
+			return fmt.Errorf("session already active: %s", existing.Title)
+		}
+		// existing == nil means ReadLock found the lock stale and removed
+		// it; loop around and try to create it again.
+	}
+
+	return fmt.Errorf("failed to acquire recording lock")
+}
+
+// update overwrites the lock file in place. Only safe to call once Acquire
+// has already succeeded for this lock, since ownership is then exclusive.
+func (l *RecordingLock) update(cfg *config.Config) error {
+	data, err := json.MarshalIndent(l, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal recording lock: %w", err)
+	}
+
 	if err := os.WriteFile(lockPath(cfg), data, 0644); err != nil {
-		return fmt.Errorf("failed to write recording lock: %w", err)
+		return fmt.Errorf("failed to update recording lock: %w", err)
 	}
 
 	return nil

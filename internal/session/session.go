@@ -38,7 +38,7 @@ type Session struct {
 
 // New creates a new session with the given parameters.
 func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
-	timestamp := time.Now().Format("20060102-1504")
+	timestamp := time.Now().Format("20060102-150405")
 	notePath := filepath.Join(cfg.Paths.SessionsDir, timestamp+".md")
 
 	transcriber, err := transcribe.New(cfg.Transcription)
@@ -82,12 +82,6 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 // the recording lock clears the moment recording stops, letting a new
 // session start immediately.
 func (s *Session) Start(ctx context.Context) error {
-	if lock, err := ReadLock(s.cfg); err != nil {
-		return err
-	} else if lock != nil {
-		return fmt.Errorf("session already active: %s", lock.Title)
-	}
-
 	if err := os.MkdirAll(s.cfg.Paths.SessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
@@ -96,13 +90,31 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
+	// Acquired atomically and as early as possible: a plain
+	// check-then-write has a race where two near-simultaneous invocations
+	// can both start recording, with the loser silently orphaned (unable
+	// to be signaled through the CLI, recording forever).
+	lock := &RecordingLock{
+		PID:            os.Getpid(),
+		Title:          s.title,
+		Path:           s.notePath,
+		StartedAt:      s.startedAt,
+		PromptTemplate: s.promptTemplate,
+		PreserveAudio:  s.preserveAudio,
+	}
+	if err := lock.Acquire(s.cfg); err != nil {
+		return err
+	}
+
 	if err := s.recorder.Start(ctx); err != nil {
+		ClearLock(s.cfg)
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
 	chunker, err := newChunker(s.cfg, s.sourcesTitle, s.recorder, s.transcriber)
 	if err != nil {
 		s.recorder.Stop()
+		ClearLock(s.cfg)
 		return err
 	}
 
@@ -113,17 +125,10 @@ func (s *Session) Start(ctx context.Context) error {
 	}
 	s.notifyID = notifyID
 
-	lock := &RecordingLock{
-		PID:            os.Getpid(),
-		Title:          s.title,
-		Path:           s.notePath,
-		StartedAt:      s.startedAt,
-		PromptTemplate: s.promptTemplate,
-		PreserveAudio:  s.preserveAudio,
-		NotifyID:       notifyID,
-	}
-	if err := lock.Save(s.cfg); err != nil {
+	lock.NotifyID = notifyID
+	if err := lock.update(s.cfg); err != nil {
 		s.recorder.Stop()
+		ClearLock(s.cfg)
 		return err
 	}
 
@@ -187,21 +192,23 @@ func (s *Session) Start(ctx context.Context) error {
 	return s.finishRecording(ctx, chunker)
 }
 
-// finishRecording stops the recorder, does one last pass to pick up
-// whatever chunk was still open, clears the recording lock so a new
-// session can start, and hands off summarization to a detached
+// finishRecording stops the recorder and clears the recording lock right
+// away, before doing anything that could take a while (transcribing the
+// last chunk, summarizing), so a new session can start immediately instead
+// of waiting on a network call. It then does one last pass to pick up
+// whatever chunk was still open and hands off summarization to a detached
 // post-processing worker.
 func (s *Session) finishRecording(ctx context.Context, chunker *chunker) error {
 	if err := s.recorder.Stop(); err != nil {
 		return fmt.Errorf("failed to stop recording: %w", err)
 	}
 
-	if err := chunker.pollOnce(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "trani: chunk processing error: %v\n", err)
-	}
-
 	if err := ClearLock(s.cfg); err != nil {
 		return err
+	}
+
+	if err := chunker.pollOnce(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "trani: chunk processing error: %v\n", err)
 	}
 
 	if s.notifyID != "" {
