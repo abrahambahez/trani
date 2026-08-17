@@ -23,7 +23,7 @@ import (
 type Session struct {
 	title          string
 	sourcesTitle   string // stable original timestamp; title may be renamed from the notes heading
-	path           string
+	notePath       string // sessions/<title>.md; the user's notes and the final summary are the same file
 	promptTemplate string
 	preserveAudio  bool
 	startedAt      time.Time
@@ -39,7 +39,7 @@ type Session struct {
 // New creates a new session with the given parameters.
 func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
 	timestamp := time.Now().Format("20060102-1504")
-	sessionPath := filepath.Join(cfg.Paths.SessionsDir, timestamp)
+	notePath := filepath.Join(cfg.Paths.SessionsDir, timestamp+".md")
 
 	transcriber, err := transcribe.New(cfg.Transcription)
 	if err != nil {
@@ -62,7 +62,7 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 	return &Session{
 		title:          timestamp,
 		sourcesTitle:   timestamp,
-		path:           sessionPath,
+		notePath:       notePath,
 		promptTemplate: promptTemplate,
 		preserveAudio:  preserveAudio,
 		startedAt:      time.Now(),
@@ -74,18 +74,13 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 	}, nil
 }
 
-// createDirectory creates the session directory if it doesn't exist.
-func (s *Session) createDirectory() error {
-	if err := os.MkdirAll(s.path, 0755); err != nil {
-		return fmt.Errorf("failed to create session directory: %w", err)
-	}
-	return nil
-}
-
-// Start begins a new recording session. It blocks on the editor (nvim needs
-// a terminal), but hands off transcription/summary post-processing to a
-// detached worker so the recording lock clears the moment recording stops,
-// letting a new session start immediately.
+// Start begins a new recording session. With nvim (no Obsidian vault
+// configured) it blocks on the editor, since nvim needs a terminal. With
+// Obsidian it opens the note non-blocking and waits for an explicit stop
+// signal instead, since Obsidian is a separate GUI app. Either way, it
+// hands off transcription/summary post-processing to a detached worker so
+// the recording lock clears the moment recording stops, letting a new
+// session start immediately.
 func (s *Session) Start(ctx context.Context) error {
 	if lock, err := ReadLock(s.cfg); err != nil {
 		return err
@@ -93,8 +88,8 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("session already active: %s", lock.Title)
 	}
 
-	if err := s.createDirectory(); err != nil {
-		return err
+	if err := os.MkdirAll(s.cfg.Paths.SessionsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
 	if err := os.MkdirAll(s.cfg.Paths.TempDir, 0755); err != nil {
@@ -121,7 +116,7 @@ func (s *Session) Start(ctx context.Context) error {
 	lock := &RecordingLock{
 		PID:            os.Getpid(),
 		Title:          s.title,
-		Path:           s.path,
+		Path:           s.notePath,
 		StartedAt:      s.startedAt,
 		PromptTemplate: s.promptTemplate,
 		PreserveAudio:  s.preserveAudio,
@@ -143,37 +138,42 @@ func (s *Session) Start(ctx context.Context) error {
 		<-chunkerDone
 	}
 
-	notesPath := filepath.Join(s.path, "notas.md")
-	editorCmd := exec.CommandContext(ctx, "nvim", notesPath)
-	editorCmd.Stdin = os.Stdin
-	editorCmd.Stdout = os.Stdout
-	editorCmd.Stderr = os.Stderr
-
-	if err := editorCmd.Start(); err != nil {
-		stopChunker()
-		s.recorder.Stop()
-		ClearLock(s.cfg)
-		return fmt.Errorf("failed to start editor: %w", err)
+	if _, err := os.Stat(s.notePath); os.IsNotExist(err) {
+		os.WriteFile(s.notePath, nil, 0644)
 	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	editorDone := make(chan error, 1)
-	go func() { editorDone <- editorCmd.Wait() }()
+	editorCmd, err := openNote(ctx, s.notePath, s.cfg)
+	if err != nil {
+		stopChunker()
+		s.recorder.Stop()
+		ClearLock(s.cfg)
+		return fmt.Errorf("failed to open note: %w", err)
+	}
 
-	select {
-	case <-sigCh:
-		editorCmd.Process.Signal(syscall.SIGTERM)
-		<-editorDone
-	case err := <-editorDone:
-		if err != nil {
-			stopChunker()
-			s.recorder.Stop()
-			ClearLock(s.cfg)
-			return fmt.Errorf("editor exited with error: %w", err)
+	if editorCmd != nil {
+		// nvim: blocks until the user closes the editor, or until signaled.
+		editorDone := make(chan error, 1)
+		go func() { editorDone <- editorCmd.Wait() }()
+
+		select {
+		case <-sigCh:
+			editorCmd.Process.Signal(syscall.SIGTERM)
+			<-editorDone
+		case err := <-editorDone:
+			if err != nil {
+				stopChunker()
+				s.recorder.Stop()
+				ClearLock(s.cfg)
+				return fmt.Errorf("editor exited with error: %w", err)
+			}
 		}
+	} else {
+		// Obsidian: already opened non-blocking; wait for an explicit stop.
+		<-sigCh
 	}
 
 	stopChunker()
@@ -181,7 +181,7 @@ func (s *Session) Start(ctx context.Context) error {
 	if err := s.extractAndRenameIfNeeded(); err != nil {
 		s.recorder.Stop()
 		ClearLock(s.cfg)
-		return fmt.Errorf("failed to rename session: %w", err)
+		return fmt.Errorf("failed to rename session note: %w", err)
 	}
 
 	return s.finishRecording(ctx, chunker)
@@ -210,7 +210,7 @@ func (s *Session) finishRecording(ctx context.Context, chunker *chunker) error {
 		s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
 	}
 
-	return SpawnPostprocess(s.path, s.sourcesTitle, s.promptTemplate, s.preserveAudio, s.notifyID)
+	return SpawnPostprocess(s.notePath, s.sourcesTitle, s.promptTemplate, s.preserveAudio, s.notifyID)
 }
 
 const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
@@ -359,10 +359,12 @@ func slugify(text string) string {
 	return slug
 }
 
+// extractAndRenameIfNeeded renames the session note from its timestamp-only
+// name to "<timestamp>-<slug-of-first-heading>.md", if the note starts with
+// a markdown H1. sourcesTitle (used for .sources/*) is left untouched, so
+// the chunker's in-progress files stay valid across the rename.
 func (s *Session) extractAndRenameIfNeeded() error {
-	notesPath := filepath.Join(s.path, "notas.md")
-
-	content, err := os.ReadFile(notesPath)
+	content, err := os.ReadFile(s.notePath)
 	if err != nil {
 		return nil
 	}
@@ -389,16 +391,15 @@ func (s *Session) extractAndRenameIfNeeded() error {
 		return nil
 	}
 
-	timestamp := filepath.Base(s.path)
-	newDirName := fmt.Sprintf("%s-%s", timestamp, slug)
-	newPath := filepath.Join(filepath.Dir(s.path), newDirName)
+	newTitle := fmt.Sprintf("%s-%s", s.sourcesTitle, slug)
+	newPath := filepath.Join(filepath.Dir(s.notePath), newTitle+".md")
 
-	if err := os.Rename(s.path, newPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to rename session directory: %v\n", err)
+	if err := os.Rename(s.notePath, newPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to rename session note: %v\n", err)
 		return nil
 	}
 
-	s.path = newPath
-	s.title = newDirName
+	s.notePath = newPath
+	s.title = newTitle
 	return nil
 }

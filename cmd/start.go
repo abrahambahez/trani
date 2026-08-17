@@ -1,15 +1,13 @@
 package cmd
 
 import (
-	"context"
-
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/session"
 	"github.com/spf13/cobra"
 )
 
 var (
-	startPrompt       string
+	startPrompt        string
 	startPreserveAudio bool
 )
 
@@ -26,12 +24,7 @@ var startCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		sess, err := session.New(startPrompt, startPreserveAudio, cfg)
-		if err != nil {
-			return err
-		}
-
-		return sess.Start(context.Background())
+		return session.Launch(startPrompt, startPreserveAudio, cfg)
 	},
 }
 

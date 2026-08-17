@@ -1,15 +1,13 @@
 package cmd
 
 import (
-	"context"
-
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/session"
 	"github.com/spf13/cobra"
 )
 
 var (
-	togglePrompt       string
+	togglePrompt        string
 	togglePreserveAudio bool
 )
 
@@ -34,12 +32,7 @@ var toggleCmd = &cobra.Command{
 			return session.SignalStop(lock)
 		}
 
-		sess, err := session.New(togglePrompt, togglePreserveAudio, cfg)
-		if err != nil {
-			return err
-		}
-
-		return sess.Start(context.Background())
+		return session.Launch(togglePrompt, togglePreserveAudio, cfg)
 	},
 }
 

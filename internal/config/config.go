@@ -15,6 +15,14 @@ type Config struct {
 	LLM           LLMConfig           `yaml:"llm"`
 	Audio         AudioConfig         `yaml:"audio"`
 	Paths         PathsConfig         `yaml:"paths"`
+	Obsidian      ObsidianConfig      `yaml:"obsidian"`
+}
+
+// ObsidianConfig points trani at an Obsidian vault for the session note.
+// When VaultPath is empty, sessions fall back to opening notes in nvim.
+type ObsidianConfig struct {
+	VaultPath string `yaml:"vault_path"`
+	CLIPath   string `yaml:"cli_path"`
 }
 
 // TranscriptionConfig specifies which backend to use and its settings.
@@ -117,6 +125,7 @@ func (c *Config) ExpandPaths() {
 	c.Paths.SessionsDir = expandPath(c.Paths.SessionsDir, home)
 	c.Paths.TempDir = expandPath(c.Paths.TempDir, home)
 	c.Paths.PromptsDir = expandPath(c.Paths.PromptsDir, home)
+	c.Obsidian.VaultPath = expandPath(c.Obsidian.VaultPath, home)
 }
 
 func expandPath(path, home string) string {
@@ -161,5 +170,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.LLM.Ollama.BaseURL == "" {
 		c.LLM.Ollama.BaseURL = "http://localhost:11434"
+	}
+
+	if c.Obsidian.CLIPath == "" {
+		c.Obsidian.CLIPath = "obsidian"
 	}
 }

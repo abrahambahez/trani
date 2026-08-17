@@ -16,9 +16,10 @@ import (
 // stopped and whose audio was already transcribed progressively, chunk by
 // chunk, by the chunker while the session was live. It only needs to clean
 // up the accumulated transcript, generate the structured summary, and
-// write it into the session's note. It runs in a detached process spawned
-// by SpawnPostprocess, decoupled from the recording lock.
-func RunPostprocessWorker(ctx context.Context, sessionPath, sourcesTitle, promptTemplate string, preserveAudio bool, notifyID string, cfg *config.Config) error {
+// overwrite the session note with it (the user's raw notes and the final
+// note are the same file). It runs in a detached process spawned by
+// SpawnPostprocess, decoupled from the recording lock.
+func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTemplate string, preserveAudio bool, notifyID string, cfg *config.Config) error {
 	notifier := notify.New()
 
 	llmClient, err := llm.New(cfg.LLM)
@@ -37,8 +38,7 @@ func RunPostprocessWorker(ctx context.Context, sessionPath, sourcesTitle, prompt
 
 	transcription := removeConsecutiveDuplicateLines(strings.TrimSpace(string(rawTranscription)))
 
-	notesPath := filepath.Join(sessionPath, "notas.md")
-	notesContent, _ := os.ReadFile(notesPath)
+	notesContent, _ := os.ReadFile(notePath)
 	notes := strings.TrimSpace(string(notesContent))
 	hasNotes := len(notes) > 0
 
@@ -46,13 +46,20 @@ func RunPostprocessWorker(ctx context.Context, sessionPath, sourcesTitle, prompt
 	prompt := fillPromptTemplate(template, transcription, notes)
 
 	resumen, err := llmClient.Generate(ctx, prompt)
-	resumenPath := filepath.Join(sessionPath, "resumen.md")
+
+	sessionTitle := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
 
 	if err != nil {
-		errorMsg := fmt.Sprintf("Error al generar resumen: %v", err)
-		os.WriteFile(resumenPath, []byte(errorMsg), 0644)
-	} else {
-		os.WriteFile(resumenPath, []byte(resumen), 0644)
+		// Leave the user's raw notes untouched on failure; only the
+		// notification reports the problem. Handled here (not returned as
+		// an error) so the caller doesn't also fire its generic failure
+		// notification on top of this specific one.
+		notifier.Error("⚠️ Trani", fmt.Sprintf("Error al generar resumen (%s): %v", sessionTitle, err))
+		return nil
+	}
+
+	if err := os.WriteFile(notePath, []byte(resumen), 0644); err != nil {
+		return fmt.Errorf("failed to update session note: %w", err)
 	}
 
 	if !preserveAudio {
@@ -61,7 +68,7 @@ func RunPostprocessWorker(ctx context.Context, sessionPath, sourcesTitle, prompt
 		}
 	}
 
-	doneMessage := fmt.Sprintf("Sesión completada - %s", filepath.Base(sessionPath))
+	doneMessage := fmt.Sprintf("Sesión completada - %s", sessionTitle)
 	if notifyID != "" {
 		notifier.Update(notifyID, "✅ Trani", doneMessage)
 	} else {
