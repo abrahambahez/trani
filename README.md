@@ -29,7 +29,7 @@ sudo apt install pipewire pipewire-pulse pipewire-audio-client-utils sox ffmpeg
 ```
 
 Optional, for the default Obsidian-integrated flow:
-- [obsidian-cli](https://github.com/Yakitrak/obsidian-cli) installed and on `PATH`
+- `xdg-open` (standard on most Linux desktops already) able to resolve the `obsidian://` URI scheme, which Obsidian itself registers on install — no separate CLI tool needed
 - Obsidian running with the target vault open (trani degrades gracefully — logs a warning and keeps going — if it isn't)
 
 Without `obsidian.vault_path` configured, sessions use `nvim` exactly like before and none of the above is required.
@@ -62,7 +62,7 @@ llm:
   backend: claude  # or "ollama" for local models
 
   claude:
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-5
     max_tokens: 4000
 
   ollama:
@@ -77,7 +77,6 @@ audio:
 
 obsidian:
   vault_path: ~/vault      # empty = fall back to nvim
-  cli_path: obsidian
 
 paths:
   sessions_dir: ~/vault/sessions  # must live inside vault_path if obsidian is configured
@@ -212,7 +211,7 @@ Shortcut: Super+T
 - Cloud-based API from Anthropic
 - High-quality structured summaries
 - Requires ANTHROPIC_API_KEY environment variable
-- Default model: claude-sonnet-4-20250514
+- No built-in default model — set `llm.claude.model` in the config (e.g. `claude-sonnet-5`)
 
 **Ollama**:
 - Local model inference
@@ -245,7 +244,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o trani
 systemctl --user status pipewire pipewire-pulse
 ```
 
-**Note doesn't open in Obsidian**: trani logs a warning and keeps recording regardless — check that Obsidian is running with the configured vault open, and that `obsidian.cli_path` points at a working `obsidian-cli` binary.
+**Note doesn't open in Obsidian**: trani logs a warning and keeps recording regardless. Check that Obsidian is running with the target vault already open (a cold start silently ignores the URI's `file=` argument, it just restores whatever was last open) and that `xdg-open` resolves `obsidian://` on your system (`xdg-open "obsidian://open?vault=<name>&file=<note>"` should jump to that note if Obsidian is already open).
 
 **"session already active" but nothing seems to be recording**: check for a stale lock at `<temp_dir>/active_recording.json`; if its PID isn't running anymore, trani clears it automatically on the next command.
 

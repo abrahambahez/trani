@@ -22,7 +22,6 @@ type Config struct {
 // When VaultPath is empty, sessions fall back to opening notes in nvim.
 type ObsidianConfig struct {
 	VaultPath string `yaml:"vault_path"`
-	CLIPath   string `yaml:"cli_path"`
 }
 
 // TranscriptionConfig specifies which backend to use and its settings.
@@ -170,9 +169,5 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.LLM.Ollama.BaseURL == "" {
 		c.LLM.Ollama.BaseURL = "http://localhost:11434"
-	}
-
-	if c.Obsidian.CLIPath == "" {
-		c.Obsidian.CLIPath = "obsidian"
 	}
 }
