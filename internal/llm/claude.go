@@ -12,12 +12,15 @@ import (
 	"github.com/sabhz/trani/internal/config"
 )
 
+const claudeAPIURL = "https://api.anthropic.com/v1/messages"
+
 // Claude is a client for the Claude API.
 type Claude struct {
 	apiKey    string
 	model     string
 	maxTokens int
 	client    *http.Client
+	baseURL   string
 }
 
 func NewClaude(cfg config.ClaudeConfig) (Generator, error) {
@@ -31,6 +34,7 @@ func NewClaude(cfg config.ClaudeConfig) (Generator, error) {
 		model:     cfg.Model,
 		maxTokens: cfg.MaxTokens,
 		client:    &http.Client{},
+		baseURL:   claudeAPIURL,
 	}, nil
 }
 
@@ -83,7 +87,7 @@ func (c *Claude) Generate(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -116,9 +120,11 @@ func (c *Claude) Generate(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if len(result.Content) == 0 {
-		return "", fmt.Errorf("no content in Claude response")
+	for _, block := range result.Content {
+		if block.Type == "text" {
+			return block.Text, nil
+		}
 	}
 
-	return result.Content[0].Text, nil
+	return "", fmt.Errorf("no text content in Claude response")
 }

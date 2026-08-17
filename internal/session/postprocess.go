@@ -49,6 +49,10 @@ func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTem
 
 	sessionTitle := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
 
+	if err == nil && strings.TrimSpace(resumen) == "" {
+		err = fmt.Errorf("the model returned an empty summary")
+	}
+
 	if err != nil {
 		// Leave the user's raw notes untouched on failure; only the
 		// notification reports the problem. Handled here (not returned as
