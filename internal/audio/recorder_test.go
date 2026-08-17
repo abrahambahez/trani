@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/sabhz/trani/internal/config"
@@ -21,14 +22,6 @@ func TestNew(t *testing.T) {
 
 	if recorder.tempDir != tempDir {
 		t.Errorf("tempDir: expected %s, got %s", tempDir, recorder.tempDir)
-	}
-
-	if recorder.sampleRate != 16000 {
-		t.Errorf("sampleRate: expected 16000, got %d", recorder.sampleRate)
-	}
-
-	if recorder.channels != 1 {
-		t.Errorf("channels: expected 1, got %d", recorder.channels)
 	}
 }
 
@@ -77,29 +70,23 @@ func TestStopWithoutStart(t *testing.T) {
 	}
 }
 
-func TestStopClearsModuleIDs(t *testing.T) {
+func TestStopClearsRecordingPID(t *testing.T) {
 	cfg := config.AudioConfig{
 		SampleRate: 16000,
 		Channels:   1,
 	}
 	recorder := New(cfg, "/tmp/test")
 
-	recorder.sinkModuleID = "123"
-	recorder.loopMicModuleID = "456"
-	recorder.loopSysModuleID = "789"
-	recorder.recordingPID = 9999
+	proc := exec.Command("sleep", "30")
+	if err := proc.Start(); err != nil {
+		t.Fatalf("failed to start placeholder process: %v", err)
+	}
+	recorder.recordingPID = proc.Process.Pid
 
-	recorder.Stop()
+	if err := recorder.Stop(); err != nil {
+		t.Errorf("Stop() should not error, got: %v", err)
+	}
 
-	if recorder.sinkModuleID != "" {
-		t.Errorf("sinkModuleID should be cleared, got: %s", recorder.sinkModuleID)
-	}
-	if recorder.loopMicModuleID != "" {
-		t.Errorf("loopMicModuleID should be cleared, got: %s", recorder.loopMicModuleID)
-	}
-	if recorder.loopSysModuleID != "" {
-		t.Errorf("loopSysModuleID should be cleared, got: %s", recorder.loopSysModuleID)
-	}
 	if recorder.recordingPID != 0 {
 		t.Errorf("recordingPID should be cleared, got: %d", recorder.recordingPID)
 	}

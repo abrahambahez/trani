@@ -26,12 +26,15 @@ var toggleCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		sess, err := session.LoadActive(cfg)
-		if err == nil {
-			return sess.Stop(context.Background())
+		lock, err := session.ReadLock(cfg)
+		if err != nil {
+			return err
+		}
+		if lock != nil {
+			return session.SignalStop(lock)
 		}
 
-		sess, err = session.New(togglePrompt, togglePreserveAudio, cfg)
+		sess, err := session.New(togglePrompt, togglePreserveAudio, cfg)
 		if err != nil {
 			return err
 		}

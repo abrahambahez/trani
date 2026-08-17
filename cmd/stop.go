@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/session"
@@ -20,12 +20,15 @@ var stopCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		sess, err := session.LoadActive(cfg)
+		lock, err := session.ReadLock(cfg)
 		if err != nil {
 			return err
 		}
+		if lock == nil {
+			return fmt.Errorf("no active session found")
+		}
 
-		return sess.Stop(context.Background())
+		return session.SignalStop(lock)
 	},
 }
 

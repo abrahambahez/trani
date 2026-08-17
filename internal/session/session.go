@@ -2,13 +2,14 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sabhz/trani/internal/audio"
@@ -25,22 +26,13 @@ type Session struct {
 	promptTemplate string
 	preserveAudio  bool
 	startedAt      time.Time
+	notifyID       string
 
 	recorder    *audio.Recorder
 	transcriber transcribe.Transcriber
 	llm         llm.Generator
 	notifier    *notify.Notifier
 	cfg         *config.Config
-}
-
-// State represents the serializable state of an active session.
-type State struct {
-	Active         bool      `json:"active"`
-	Title          string    `json:"title"`
-	StartedAt      time.Time `json:"started_at"`
-	Path           string    `json:"path"`
-	PromptTemplate string    `json:"prompt_template"`
-	PreserveAudio  bool      `json:"preserve_audio"`
 }
 
 // New creates a new session with the given parameters.
@@ -88,94 +80,115 @@ func (s *Session) createDirectory() error {
 	return nil
 }
 
-// Start begins a new recording session.
+// Start begins a new recording session. It blocks on the editor (nvim needs
+// a terminal), but hands off transcription/summary post-processing to a
+// detached worker so the recording lock clears the moment recording stops,
+// letting a new session start immediately.
 func (s *Session) Start(ctx context.Context) error {
-	statePath := filepath.Join(s.cfg.Paths.TempDir, "current_session.json")
-	if _, err := os.Stat(statePath); err == nil {
-		existingState, err := os.ReadFile(statePath)
-		if err == nil {
-			var state State
-			if json.Unmarshal(existingState, &state) == nil && state.Active {
-				return fmt.Errorf("session already active: %s", state.Title)
-			}
-		}
+	if lock, err := ReadLock(s.cfg); err != nil {
+		return err
+	} else if lock != nil {
+		return fmt.Errorf("session already active: %s", lock.Title)
 	}
 
 	if err := s.createDirectory(); err != nil {
 		return err
 	}
 
-	if err := s.recorder.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start recording: %w", err)
-	}
-
-	if err := s.SaveState(); err != nil {
-		s.recorder.Stop()
-		return err
-	}
-
-	message := fmt.Sprintf("Grabación iniciada - %s", s.title)
-	s.notifier.Info("🎙️ Trani", message)
-
-	notesPath := filepath.Join(s.path, "notas.md")
-	cmd := exec.CommandContext(ctx, "nvim", notesPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		s.recorder.Stop()
-		return fmt.Errorf("editor exited with error: %w", err)
-	}
-
-	if err := s.extractAndRenameIfNeeded(); err != nil {
-		s.recorder.Stop()
-		return fmt.Errorf("failed to rename session: %w", err)
-	}
-
-	if err := s.SaveState(); err != nil {
-		s.recorder.Stop()
-		return fmt.Errorf("failed to save session state: %w", err)
-	}
-
-	return s.Stop(ctx)
-}
-
-// SaveState writes the current session state to temp/current_session.json.
-func (s *Session) SaveState() error {
-	state := State{
-		Active:         true,
-		Title:          s.title,
-		StartedAt:      s.startedAt,
-		Path:           s.path,
-		PromptTemplate: s.promptTemplate,
-		PreserveAudio:  s.preserveAudio,
-	}
-
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
-	}
-
-	statePath := filepath.Join(s.cfg.Paths.TempDir, "current_session.json")
 	if err := os.MkdirAll(s.cfg.Paths.TempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	if err := os.WriteFile(statePath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write state file: %w", err)
+	if err := s.recorder.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
-	return nil
+	message := fmt.Sprintf("Grabación iniciada - %s", s.title)
+	notifyID, err := s.notifier.Start("🎙️ Trani", message)
+	if err != nil {
+		notifyID = ""
+	}
+	s.notifyID = notifyID
+
+	lock := &RecordingLock{
+		PID:            os.Getpid(),
+		Title:          s.title,
+		Path:           s.path,
+		StartedAt:      s.startedAt,
+		PromptTemplate: s.promptTemplate,
+		PreserveAudio:  s.preserveAudio,
+		NotifyID:       notifyID,
+	}
+	if err := lock.Save(s.cfg); err != nil {
+		s.recorder.Stop()
+		return err
+	}
+
+	notesPath := filepath.Join(s.path, "notas.md")
+	editorCmd := exec.CommandContext(ctx, "nvim", notesPath)
+	editorCmd.Stdin = os.Stdin
+	editorCmd.Stdout = os.Stdout
+	editorCmd.Stderr = os.Stderr
+
+	if err := editorCmd.Start(); err != nil {
+		s.recorder.Stop()
+		ClearLock(s.cfg)
+		return fmt.Errorf("failed to start editor: %w", err)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	editorDone := make(chan error, 1)
+	go func() { editorDone <- editorCmd.Wait() }()
+
+	select {
+	case <-sigCh:
+		editorCmd.Process.Signal(syscall.SIGTERM)
+		<-editorDone
+	case err := <-editorDone:
+		if err != nil {
+			s.recorder.Stop()
+			ClearLock(s.cfg)
+			return fmt.Errorf("editor exited with error: %w", err)
+		}
+	}
+
+	if err := s.extractAndRenameIfNeeded(); err != nil {
+		s.recorder.Stop()
+		ClearLock(s.cfg)
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+
+	return s.finishRecording()
 }
 
-// ClearState removes the current_session.json file.
-func (s *Session) ClearState() error {
-	statePath := filepath.Join(s.cfg.Paths.TempDir, "current_session.json")
-	if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to clear state file: %w", err)
+// finishRecording stops the recorder, clears the recording lock so a new
+// session can start, and hands off transcription/summary to a detached
+// post-processing worker.
+func (s *Session) finishRecording() error {
+	if err := s.recorder.Stop(); err != nil {
+		return fmt.Errorf("failed to stop recording: %w", err)
 	}
-	return nil
+
+	recordingPath := s.recorder.RecordingPath()
+	audioPath := filepath.Join(s.path, "audio.wav")
+	if err := os.Rename(recordingPath, audioPath); err != nil {
+		return fmt.Errorf("failed to move audio file: %w", err)
+	}
+
+	if err := ClearLock(s.cfg); err != nil {
+		return err
+	}
+
+	if s.notifyID != "" {
+		s.notifier.Update(s.notifyID, "⏸️ Trani", "Grabación detenida. Procesando...")
+	} else {
+		s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
+	}
+
+	return SpawnPostprocess(s.path, s.promptTemplate, s.preserveAudio, s.notifyID)
 }
 
 const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
@@ -268,125 +281,11 @@ func ensureDefaultPrompts(promptsDir string) error {
 	return nil
 }
 
-// LoadActive restores a session from current_session.json.
-func LoadActive(cfg *config.Config) (*Session, error) {
-	statePath := filepath.Join(cfg.Paths.TempDir, "current_session.json")
-
-	data, err := os.ReadFile(statePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no active session found")
-		}
-		return nil, fmt.Errorf("failed to read state file: %w", err)
-	}
-
-	var state State
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("failed to parse state file: %w", err)
-	}
-
-	if !state.Active {
-		return nil, fmt.Errorf("no active session found")
-	}
-
-	session, err := New(state.PromptTemplate, state.PreserveAudio, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to reconstruct session: %w", err)
-	}
-
-	session.title = state.Title
-	session.startedAt = state.StartedAt
-	session.path = state.Path
-
-	return session, nil
-}
-
-func (s *Session) loadPromptTemplate(hasNotes bool) string {
-	suffix := ".txt"
-	if !hasNotes {
-		suffix = "_no_notes.txt"
-	}
-
-	filename := s.promptTemplate + suffix
-	promptPath := filepath.Join(s.cfg.Paths.PromptsDir, filename)
-
-	content, err := os.ReadFile(promptPath)
-	if err != nil {
-		defaultFilename := "default" + suffix
-		defaultPath := filepath.Join(s.cfg.Paths.PromptsDir, defaultFilename)
-		content, err = os.ReadFile(defaultPath)
-		if err != nil {
-			return "Error: No se pudo cargar la plantilla de prompt. Verifica la configuración."
-		}
-	}
-
-	return string(content)
-}
-
 // fillPromptTemplate replaces {{TRANSCRIPTION}} and {{NOTES}} placeholders.
 func fillPromptTemplate(template, transcription, notes string) string {
 	result := strings.ReplaceAll(template, "{{TRANSCRIPTION}}", transcription)
 	result = strings.ReplaceAll(result, "{{NOTES}}", notes)
 	return result
-}
-
-// Stop stops the recording session and processes the audio.
-func (s *Session) Stop(ctx context.Context) error {
-	if err := s.recorder.Stop(); err != nil {
-		return fmt.Errorf("failed to stop recording: %w", err)
-	}
-
-	s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
-
-	recordingPath := s.recorder.RecordingPath()
-	audioPath := filepath.Join(s.path, "audio.wav")
-
-	if err := os.Rename(recordingPath, audioPath); err != nil {
-		return fmt.Errorf("failed to move audio file: %w", err)
-	}
-
-	if err := postProcessAudio(audioPath); err != nil {
-		return fmt.Errorf("failed to process audio: %w", err)
-	}
-
-	transcription, err := s.transcriber.Transcribe(ctx, audioPath)
-	if err != nil {
-		return fmt.Errorf("transcription failed: %w", err)
-	}
-
-	transcriptionPath := filepath.Join(s.path, "transcripcion.txt")
-	if err := os.WriteFile(transcriptionPath, []byte(transcription), 0644); err != nil {
-		return fmt.Errorf("failed to save transcription: %w", err)
-	}
-
-	notesPath := filepath.Join(s.path, "notas.md")
-	notesContent, _ := os.ReadFile(notesPath)
-	notes := strings.TrimSpace(string(notesContent))
-	hasNotes := len(notes) > 0
-
-	template := s.loadPromptTemplate(hasNotes)
-	prompt := fillPromptTemplate(template, transcription, notes)
-
-	resumen, err := s.llm.Generate(ctx, prompt)
-	resumenPath := filepath.Join(s.path, "resumen.md")
-
-	if err != nil {
-		errorMsg := fmt.Sprintf("Error al generar resumen: %v", err)
-		os.WriteFile(resumenPath, []byte(errorMsg), 0644)
-	} else {
-		os.WriteFile(resumenPath, []byte(resumen), 0644)
-	}
-
-	if err := s.cleanupAudio(); err != nil {
-		return err
-	}
-
-	if err := s.ClearState(); err != nil {
-		return err
-	}
-
-	s.notifier.Info("✅ Trani", fmt.Sprintf("Sesión completada - %s", s.title))
-	return nil
 }
 
 // postProcessAudio downsample to 16kHz mono and normalize audio.
@@ -412,20 +311,6 @@ func postProcessAudio(audioPath string) error {
 	if err := os.Rename(tempPath, audioPath); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to replace audio file: %w", err)
-	}
-
-	return nil
-}
-
-// cleanupAudio removes the audio file unless preserveAudio flag is set.
-func (s *Session) cleanupAudio() error {
-	if s.preserveAudio {
-		return nil
-	}
-
-	audioPath := filepath.Join(s.path, "audio.wav")
-	if err := os.Remove(audioPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove audio file: %w", err)
 	}
 
 	return nil
@@ -498,4 +383,3 @@ func (s *Session) extractAndRenameIfNeeded() error {
 	s.title = newDirName
 	return nil
 }
-
