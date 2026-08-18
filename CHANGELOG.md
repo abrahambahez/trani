@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.0] - 2026-08-18
+## [2.0.0] - 2026-08-18
 
 ### Added
 - `--preserve-audio` flag to keep original audio file after processing
