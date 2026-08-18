@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-18
+
+### Removed
+- `PRD.md` (redundant with the README as project entry point) and the stale root-level `config.json` (superseded by `~/.config/trani/config.yaml`)
+
+### Fixed
+- README "Build from Source" pointed at a placeholder `yourusername/trani` clone URL instead of the real repository
+
 ## [2.0.0] - 2026-08-18
 
 ### Added

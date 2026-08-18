@@ -221,7 +221,7 @@ Shortcut: Super+T
 ## Build from Source
 
 ```bash
-git clone https://github.com/yourusername/trani
+git clone https://github.com/abrahambahez/trani
 cd trani
 go build -o trani
 ```
