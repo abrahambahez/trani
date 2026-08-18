@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-18
+
+### Fixed
+- Post-processing (both `process` and the live session flow) no longer sends a broken placeholder prompt to the model when the requested prompt template and its `default` fallback are both missing; it now aborts before calling the LLM
+
 ## [2.0.1] - 2026-08-18
 
 ### Removed

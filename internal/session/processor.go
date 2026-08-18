@@ -81,7 +81,10 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 	}
 
 	hasNotes := len(notes) > 0
-	template := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
+	template, err := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
+	if err != nil {
+		return fmt.Errorf("failed to load prompt template: %w", err)
+	}
 	prompt := fillPromptTemplate(template, transcription, notes)
 
 	resumen, err := llmClient.Generate(ctx, prompt)
@@ -102,7 +105,7 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 	return nil
 }
 
-func loadPromptTemplateStandalone(promptsDir, templateName string, hasNotes bool) string {
+func loadPromptTemplateStandalone(promptsDir, templateName string, hasNotes bool) (string, error) {
 	suffix := ".txt"
 	if !hasNotes {
 		suffix = "_no_notes.txt"
@@ -117,11 +120,11 @@ func loadPromptTemplateStandalone(promptsDir, templateName string, hasNotes bool
 		defaultPath := filepath.Join(promptsDir, defaultFilename)
 		content, err = os.ReadFile(defaultPath)
 		if err != nil {
-			return "Error: No se pudo cargar la plantilla de prompt. Verifica la configuración."
+			return "", fmt.Errorf("neither %q nor %q exist in %s", filename, defaultFilename, promptsDir)
 		}
 	}
 
-	return string(content)
+	return string(content), nil
 }
 
 func copyFile(src, dst string) error {

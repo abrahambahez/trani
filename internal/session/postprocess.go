@@ -42,12 +42,16 @@ func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTem
 	notes := strings.TrimSpace(string(notesContent))
 	hasNotes := len(notes) > 0
 
-	template := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
+	sessionTitle := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
+
+	template, err := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
+	if err != nil {
+		notifier.Error("⚠️ Trani", fmt.Sprintf("Error al cargar plantilla de prompt (%s): %v", sessionTitle, err))
+		return nil
+	}
 	prompt := fillPromptTemplate(template, transcription, notes)
 
 	resumen, err := llmClient.Generate(ctx, prompt)
-
-	sessionTitle := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
 
 	if err == nil && strings.TrimSpace(resumen) == "" {
 		err = fmt.Errorf("the model returned an empty summary")
