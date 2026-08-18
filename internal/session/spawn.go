@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,24 +68,18 @@ func SpawnRecorder(promptTemplate string, preserveAudio bool) error {
 	return spawnDetached(args...)
 }
 
-// Launch starts a session, either blocking in the foreground (nvim
-// fallback, since it needs a terminal) or as a detached background worker
-// (Obsidian), depending on whether an Obsidian vault is configured.
+// Launch starts a session as a detached background worker. Requires an
+// Obsidian vault to be configured.
 func Launch(promptTemplate string, preserveAudio bool, cfg *config.Config) error {
+	if cfg.Obsidian.VaultPath == "" {
+		return fmt.Errorf("obsidian.vault_path is not configured")
+	}
+
 	if lock, err := ReadLock(cfg); err != nil {
 		return err
 	} else if lock != nil {
 		return fmt.Errorf("session already active: %s", lock.Title)
 	}
 
-	if cfg.Obsidian.VaultPath != "" {
-		return SpawnRecorder(promptTemplate, preserveAudio)
-	}
-
-	sess, err := New(promptTemplate, preserveAudio, cfg)
-	if err != nil {
-		return err
-	}
-
-	return sess.Start(context.Background())
+	return SpawnRecorder(promptTemplate, preserveAudio)
 }

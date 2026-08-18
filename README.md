@@ -4,7 +4,7 @@ A streamlined tool for recording, transcribing, and summarizing audio sessions w
 
 ## Overview
 
-Trani captures microphone and/or system audio, transcribes it progressively while the session is still running, and generates a structured summary through an LLM. Sessions default to a note in an Obsidian vault (falling back to nvim if no vault is configured); most of the transcription happens in the background while you're still in the meeting, not all at once afterward.
+Trani captures microphone and/or system audio, transcribes it progressively while the session is still running, and generates a structured summary through an LLM. Sessions require an Obsidian vault to be configured, and open the note there; most of the transcription happens in the background while you're still in the meeting, not all at once afterward.
 
 ## Features
 
@@ -12,7 +12,7 @@ Trani captures microphone and/or system audio, transcribes it progressively whil
 - **Progressive, chunked transcription**: audio is segmented and transcribed while the session is live, not all at once when it stops
 - **Dual transcription backends**: local whisper.cpp or OpenAI Whisper API
 - **AI-powered summaries**: pluggable LLM backend (Claude or Ollama) with customizable prompts
-- **Obsidian-first, nvim fallback**: notes open in your Obsidian vault by default; with no vault configured, nvim works exactly as before
+- **Obsidian required**: notes open in your Obsidian vault; `start`/`toggle` fail immediately if no vault is configured
 - **Concurrent-safe sessions**: starting a new session doesn't wait for the previous one's summary to finish generating
 - **Flexible commands**: start, stop, or toggle recording with keyboard shortcuts
 
@@ -28,11 +28,11 @@ sudo dnf install pipewire pipewire-pulse pipewire-utils sox ffmpeg
 sudo apt install pipewire pipewire-pulse pipewire-audio-client-utils sox ffmpeg
 ```
 
-Optional, for the default Obsidian-integrated flow:
+Required, for the live session flow (`start`/`toggle`/`stop`):
 - `xdg-open` (standard on most Linux desktops already) able to resolve the `obsidian://` URI scheme, which Obsidian itself registers on install — no separate CLI tool needed
 - Obsidian running with the target vault open (trani degrades gracefully — logs a warning and keeps going — if it isn't)
 
-Without `obsidian.vault_path` configured, sessions use `nvim` exactly like before and none of the above is required.
+`trani process` (reprocessing an existing audio file) doesn't need any of the above.
 
 ### Setup
 
@@ -76,7 +76,7 @@ audio:
   chunk_seconds: 300       # how often to segment and transcribe progressively
 
 obsidian:
-  vault_path: ~/vault      # empty = fall back to nvim
+  vault_path: ~/vault      # required for start/toggle/stop
 
 paths:
   sessions_dir: ~/vault/sessions  # must live inside vault_path if obsidian is configured
@@ -93,15 +93,13 @@ paths:
 trani toggle
 ```
 
-With `obsidian.vault_path` configured:
+Requires `obsidian.vault_path` to be configured:
 1. Starts recording in the background and returns immediately
 2. Opens the session note in Obsidian
 3. Audio is segmented and transcribed progressively as the session runs
 4. Take notes in the note Obsidian opened
-5. Run `trani toggle` (or `trani stop`) again to stop: recording stops, the note is renamed from its heading if it has one, and a summary is generated and written into the same note
+5. Run `trani toggle` (or `trani stop`) again to stop: recording stops and a summary is generated and written into the same note
 6. A new `trani toggle` can be run immediately, even while the previous session's summary is still being generated
-
-With no vault configured, this works the same way but blocks in the foreground with `nvim` open (like the original workflow): closing nvim stops the recording.
 
 **Manual stop:**
 ```bash
@@ -141,14 +139,14 @@ trani process <audio-file> --notes FILE --title NAME --prompt TEMPLATE
 
 Sessions:
 ```
-<sessions_dir>/2026-01-15-143022-meeting-title.md   # notes + final summary, same file
-<sessions_dir>/.sources/2026-01-15-143022.txt        # accumulated raw transcript
-<sessions_dir>/.sources/2026-01-15-143022.wav        # archived audio (deleted unless --preserve-audio)
+<sessions_dir>/2026-01-15 1430.md                  # notes + final summary, same file
+<sessions_dir>/.sources/2026-01-15 1430.txt        # accumulated raw transcript
+<sessions_dir>/.sources/2026-01-15 1430.wav        # archived audio (deleted unless --preserve-audio)
 ```
 
 `process`:
 ```
-<sessions_dir>/2026-01-15-143022/
+<sessions_dir>/2026-01-15 1430/
 ├── transcripcion.txt  # Full transcription
 ├── notas.md           # User notes
 ├── resumen.md          # AI-generated summary
@@ -250,7 +248,7 @@ systemctl --user status pipewire pipewire-pulse
 
 ## Configuration Reference
 
-See `docs/PRD/001-trani-go.md` and `docs/ADR/` for architecture decisions and rationale behind the audio capture and session design.
+See `docs/ADR/` for architecture decisions and rationale behind the audio capture and session design.
 
 ## License
 

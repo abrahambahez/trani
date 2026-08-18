@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -21,8 +20,7 @@ import (
 
 // Session represents an active recording session.
 type Session struct {
-	title          string
-	sourcesTitle   string // stable original timestamp; title may be renamed from the notes heading
+	title          string // also the .sources/<title> basename
 	notePath       string // sessions/<title>.md; the user's notes and the final summary are the same file
 	promptTemplate string
 	preserveAudio  bool
@@ -38,7 +36,7 @@ type Session struct {
 
 // New creates a new session with the given parameters.
 func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format("2006-01-02 1504")
 	notePath := filepath.Join(cfg.Paths.SessionsDir, timestamp+".md")
 
 	transcriber, err := transcribe.New(cfg.Transcription)
@@ -61,7 +59,6 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 
 	return &Session{
 		title:          timestamp,
-		sourcesTitle:   timestamp,
 		notePath:       notePath,
 		promptTemplate: promptTemplate,
 		preserveAudio:  preserveAudio,
@@ -74,13 +71,11 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 	}, nil
 }
 
-// Start begins a new recording session. With nvim (no Obsidian vault
-// configured) it blocks on the editor, since nvim needs a terminal. With
-// Obsidian it opens the note non-blocking and waits for an explicit stop
-// signal instead, since Obsidian is a separate GUI app. Either way, it
-// hands off transcription/summary post-processing to a detached worker so
-// the recording lock clears the moment recording stops, letting a new
-// session start immediately.
+// Start begins a new recording session. It opens the note in Obsidian
+// non-blocking and waits for an explicit stop signal, since Obsidian is a
+// separate GUI app. It hands off transcription/summary post-processing to a
+// detached worker so the recording lock clears the moment recording stops,
+// letting a new session start immediately.
 func (s *Session) Start(ctx context.Context) error {
 	if err := os.MkdirAll(s.cfg.Paths.SessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
@@ -111,7 +106,7 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
-	chunker, err := newChunker(s.cfg, s.sourcesTitle, s.recorder, s.transcriber)
+	chunker, err := newChunker(s.cfg, s.title, s.recorder, s.transcriber)
 	if err != nil {
 		s.recorder.Stop()
 		ClearLock(s.cfg)
@@ -151,43 +146,15 @@ func (s *Session) Start(ctx context.Context) error {
 	signal.Notify(sigCh, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	editorCmd, err := openNote(ctx, s.notePath, s.cfg)
-	if err != nil {
+	if err := openNote(ctx, s.notePath, s.cfg); err != nil {
 		stopChunker()
 		s.recorder.Stop()
 		ClearLock(s.cfg)
 		return fmt.Errorf("failed to open note: %w", err)
 	}
 
-	if editorCmd != nil {
-		// nvim: blocks until the user closes the editor, or until signaled.
-		editorDone := make(chan error, 1)
-		go func() { editorDone <- editorCmd.Wait() }()
-
-		select {
-		case <-sigCh:
-			editorCmd.Process.Signal(syscall.SIGTERM)
-			<-editorDone
-		case err := <-editorDone:
-			if err != nil {
-				stopChunker()
-				s.recorder.Stop()
-				ClearLock(s.cfg)
-				return fmt.Errorf("editor exited with error: %w", err)
-			}
-		}
-	} else {
-		// Obsidian: already opened non-blocking; wait for an explicit stop.
-		<-sigCh
-	}
-
+	<-sigCh
 	stopChunker()
-
-	if err := s.extractAndRenameIfNeeded(); err != nil {
-		s.recorder.Stop()
-		ClearLock(s.cfg)
-		return fmt.Errorf("failed to rename session note: %w", err)
-	}
 
 	return s.finishRecording(ctx, chunker)
 }
@@ -217,7 +184,7 @@ func (s *Session) finishRecording(ctx context.Context, chunker *chunker) error {
 		s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
 	}
 
-	return SpawnPostprocess(s.notePath, s.sourcesTitle, s.promptTemplate, s.preserveAudio, s.notifyID)
+	return SpawnPostprocess(s.notePath, s.title, s.promptTemplate, s.preserveAudio, s.notifyID)
 }
 
 const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.
@@ -342,71 +309,3 @@ func postProcessAudio(audioPath string) error {
 	return nil
 }
 
-func slugify(text string) string {
-	slug := strings.ToLower(text)
-	slug = strings.ReplaceAll(slug, " ", "-")
-
-	specialCharsRegex := regexp.MustCompile(`[^a-z0-9-]+`)
-	slug = specialCharsRegex.ReplaceAllString(slug, "")
-
-	multiHyphenRegex := regexp.MustCompile(`-+`)
-	slug = multiHyphenRegex.ReplaceAllString(slug, "-")
-
-	slug = strings.Trim(slug, "-")
-
-	if len(slug) > 50 {
-		runes := []rune(slug)
-		if len(runes) > 50 {
-			slug = string(runes[:50])
-		}
-	}
-
-	slug = strings.Trim(slug, "-")
-
-	return slug
-}
-
-// extractAndRenameIfNeeded renames the session note from its timestamp-only
-// name to "<timestamp>-<slug-of-first-heading>.md", if the note starts with
-// a markdown H1. sourcesTitle (used for .sources/*) is left untouched, so
-// the chunker's in-progress files stay valid across the rename.
-func (s *Session) extractAndRenameIfNeeded() error {
-	content, err := os.ReadFile(s.notePath)
-	if err != nil {
-		return nil
-	}
-
-	lines := strings.Split(string(content), "\n")
-	if len(lines) == 0 {
-		return nil
-	}
-
-	firstLine := lines[0]
-	if !strings.HasPrefix(firstLine, "# ") {
-		return nil
-	}
-
-	heading := strings.TrimPrefix(firstLine, "# ")
-	heading = strings.TrimSpace(heading)
-
-	if heading == "" {
-		return nil
-	}
-
-	slug := slugify(heading)
-	if slug == "" {
-		return nil
-	}
-
-	newTitle := fmt.Sprintf("%s-%s", s.sourcesTitle, slug)
-	newPath := filepath.Join(filepath.Dir(s.notePath), newTitle+".md")
-
-	if err := os.Rename(s.notePath, newPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to rename session note: %v\n", err)
-		return nil
-	}
-
-	s.notePath = newPath
-	s.title = newTitle
-	return nil
-}

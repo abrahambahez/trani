@@ -39,12 +39,9 @@ func buildObsidianURI(vaultPath, notePath string) (string, error) {
 	), nil
 }
 
-// openNote opens the session note for the user. With no Obsidian vault
-// configured, it falls back to nvim in the foreground and returns the
-// running *exec.Cmd for the caller to wait on. With a vault configured, it
-// opens the note in Obsidian (non-blocking, since Obsidian is a separate
-// GUI app) and returns a nil *exec.Cmd, signaling the caller should wait
-// for an explicit stop signal instead of an editor process.
+// openNote opens the session note in Obsidian, non-blocking since Obsidian
+// is a separate GUI app; the caller waits for an explicit stop signal
+// instead of an editor process.
 //
 // Opening goes through Obsidian's own "obsidian://open" URI, dispatched via
 // xdg-open, not the obsidian-cli's "open" subcommand: on this setup (a
@@ -57,23 +54,10 @@ func buildObsidianURI(vaultPath, notePath string) (string, error) {
 // A failure to open the URI degrades to a warning instead of failing the
 // session: the note file already exists on disk and trani can read/write
 // it directly regardless of whether the GUI ever opened it.
-func openNote(ctx context.Context, notePath string, cfg *config.Config) (*exec.Cmd, error) {
-	if cfg.Obsidian.VaultPath == "" {
-		cmd := exec.CommandContext(ctx, "nvim", notePath)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start editor: %w", err)
-		}
-
-		return cmd, nil
-	}
-
+func openNote(ctx context.Context, notePath string, cfg *config.Config) error {
 	uri, err := buildObsidianURI(cfg.Obsidian.VaultPath, notePath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	openCtx, cancel := context.WithTimeout(ctx, obsidianOpenTimeout)
@@ -83,5 +67,5 @@ func openNote(ctx context.Context, notePath string, cfg *config.Config) (*exec.C
 		fmt.Fprintf(os.Stderr, "trani: warning: failed to open note in Obsidian: %v\n", err)
 	}
 
-	return nil, nil
+	return nil
 }

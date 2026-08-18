@@ -23,7 +23,7 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 		title = strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath))
 	}
 
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format("2006-01-02 1504")
 	sessionPath := filepath.Join(cfg.Paths.SessionsDir, timestamp)
 
 	if err := os.MkdirAll(sessionPath, 0755); err != nil {
@@ -77,29 +77,6 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 		notesDestPath := filepath.Join(sessionPath, "notas.md")
 		if err := os.WriteFile(notesDestPath, notesContent, 0644); err != nil {
 			return fmt.Errorf("failed to save notes: %w", err)
-		}
-
-		lines := strings.Split(string(notesContent), "\n")
-		if len(lines) > 0 {
-			firstLine := lines[0]
-			if strings.HasPrefix(firstLine, "# ") {
-				heading := strings.TrimPrefix(firstLine, "# ")
-				heading = strings.TrimSpace(heading)
-
-				if heading != "" {
-					slug := slugify(heading)
-					if slug != "" {
-						newDirName := fmt.Sprintf("%s-%s", timestamp, slug)
-						newPath := filepath.Join(filepath.Dir(sessionPath), newDirName)
-
-						if err := os.Rename(sessionPath, newPath); err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: failed to rename session directory: %v\n", err)
-						} else {
-							sessionPath = newPath
-						}
-					}
-				}
-			}
 		}
 	}
 

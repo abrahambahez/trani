@@ -7,19 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-18
+
 ### Added
 - `--preserve-audio` flag to keep original audio file after processing
 - Microphone capture, alone (`audio.mode: mic`) or together with system output (`audio.mode: mic_system`) for meetings, as two independent direct streams (never through a virtual sink)
 - Two selectable strategies for combining mic + system audio (`audio.mix_strategy`): `post_mix` (normalize each stream, then mix and renormalize) and `separate_transcribe` (transcribe each stream independently and concatenate)
 - Progressive, chunked recording and transcription (`audio.chunk_seconds`, default 300s): most of the transcription happens while the session is still running instead of all at once when it stops, accumulating into `sessions/.sources/<timestamp>.txt` and `.wav`
 - Automatic cleanup of consecutive duplicate transcript lines (a common Whisper hallucination) before generating the summary
-- Obsidian integration (`obsidian.vault_path`, `obsidian.cli_path`): sessions default to opening/updating a note in an Obsidian vault via the Obsidian CLI; with no vault configured, nvim keeps working exactly as before
+- Obsidian integration (`obsidian.vault_path`, required): sessions open the note via Obsidian's `obsidian://open` URI; `start`/`toggle` fail if no vault is configured
 - Session notes are now a single file: the user's raw notes and the generated summary are the same note, overwritten in place once the summary is ready (left untouched if summary generation fails)
 
 ### Changed
 - Recording lock now covers only active recording, not post-processing: a new session can start immediately after stopping the previous one, even while its summary is still being generated
 - Lock acquisition is now atomic, closing a race where two near-simultaneous session starts could orphan an unstoppable background recording
-- Session timestamps now include seconds (`20060102-150405`), not just minutes, avoiding collisions between sessions started in the same minute
+- Session timestamps now use the `2006-01-02 1504` format (date with dashes, space, then HHMM)
 
 ### Fixed
 - `internal/audio/recorder_test.go` referenced fields that no longer existed in `Recorder`, breaking `go test ./...`

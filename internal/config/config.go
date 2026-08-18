@@ -19,7 +19,8 @@ type Config struct {
 }
 
 // ObsidianConfig points trani at an Obsidian vault for the session note.
-// When VaultPath is empty, sessions fall back to opening notes in nvim.
+// VaultPath is required for the live session flow (start/toggle/stop);
+// Launch fails immediately if it's empty.
 type ObsidianConfig struct {
 	VaultPath string `yaml:"vault_path"`
 }
