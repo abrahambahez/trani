@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-18
+
+### Added
+- Error-only JSON Lines log at `~/.config/trani/logs.jsonl` (`pkg/errlog`, `log/slog` with a JSON handler): every failure that today only surfaces as an ephemeral desktop notification, or (for the Obsidian-open warning) not even that, since detached-worker stdio goes to `/dev/null`, is now also appended there with an `event` code and the session title
+
 ## [2.0.2] - 2026-08-18
 
 ### Fixed

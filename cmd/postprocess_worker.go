@@ -6,6 +6,7 @@ import (
 
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/session"
+	"github.com/sabhz/trani/pkg/errlog"
 	"github.com/sabhz/trani/pkg/notify"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,7 @@ var postprocessWorkerCmd = &cobra.Command{
 			// stdio is redirected to /dev/null in this detached process, so a
 			// returned error would otherwise be invisible to the user.
 			notify.New().Error("⚠️ Trani", fmt.Sprintf("Error procesando la sesión: %v", err))
+			errlog.Error("postprocess", postprocessSourcesTitle, err)
 		}
 		return err
 	},

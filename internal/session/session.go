@@ -34,6 +34,9 @@ type Session struct {
 	cfg         *config.Config
 }
 
+// Title returns the session's timestamp-based title (also the .sources/<title> basename).
+func (s *Session) Title() string { return s.title }
+
 // New creates a new session with the given parameters.
 func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
 	timestamp := time.Now().Format("2006-01-02 1504")

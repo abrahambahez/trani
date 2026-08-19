@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/sabhz/trani/internal/config"
+	"github.com/sabhz/trani/pkg/errlog"
 )
 
 // obsidianOpenTimeout bounds the call opening Obsidian's URI so a stuck
@@ -64,7 +64,8 @@ func openNote(ctx context.Context, notePath string, cfg *config.Config) error {
 	defer cancel()
 
 	if err := exec.CommandContext(openCtx, "xdg-open", uri).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "trani: warning: failed to open note in Obsidian: %v\n", err)
+		sessionTitle := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
+		errlog.Error("obsidian_open", sessionTitle, err)
 	}
 
 	return nil

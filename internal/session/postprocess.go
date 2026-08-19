@@ -9,6 +9,7 @@ import (
 
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/llm"
+	"github.com/sabhz/trani/pkg/errlog"
 	"github.com/sabhz/trani/pkg/notify"
 )
 
@@ -47,6 +48,7 @@ func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTem
 	template, err := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
 	if err != nil {
 		notifier.Error("⚠️ Trani", fmt.Sprintf("Error al cargar plantilla de prompt (%s): %v", sessionTitle, err))
+		errlog.Error("prompt_template", sessionTitle, err)
 		return nil
 	}
 	prompt := fillPromptTemplate(template, transcription, notes)
@@ -63,6 +65,7 @@ func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTem
 		// an error) so the caller doesn't also fire its generic failure
 		// notification on top of this specific one.
 		notifier.Error("⚠️ Trani", fmt.Sprintf("Error al generar resumen (%s): %v", sessionTitle, err))
+		errlog.Error("summary", sessionTitle, err)
 		return nil
 	}
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sabhz/trani/internal/config"
 	"github.com/sabhz/trani/internal/session"
+	"github.com/sabhz/trani/pkg/errlog"
 	"github.com/sabhz/trani/pkg/notify"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,7 @@ var recordWorkerCmd = &cobra.Command{
 		sess, err := session.New(recordWorkerPrompt, recordWorkerPreserveAudio, cfg)
 		if err != nil {
 			notify.New().Error("⚠️ Trani", fmt.Sprintf("Error al iniciar la sesión: %v", err))
+			errlog.Error("session_init", "", err)
 			return err
 		}
 
@@ -41,6 +43,7 @@ var recordWorkerCmd = &cobra.Command{
 			// stdio is redirected to /dev/null in this detached process, so a
 			// returned error would otherwise be invisible to the user.
 			notify.New().Error("⚠️ Trani", fmt.Sprintf("Error en la sesión: %v", err))
+			errlog.Error("session_start", sess.Title(), err)
 			return err
 		}
 

@@ -246,6 +246,8 @@ systemctl --user status pipewire pipewire-pulse
 
 **"session already active" but nothing seems to be recording**: check for a stale lock at `<temp_dir>/active_recording.json`; if its PID isn't running anymore, trani clears it automatically on the next command.
 
+**Errors that only flashed by in a desktop notification**: the live session flow (`start`/`toggle`/`stop`) runs as detached background workers with no visible stdout/stderr, so failures show up as a `notify-send` popup that's easy to miss. Every such failure is also appended as a JSON line to `~/.config/trani/logs.jsonl` (`{"time":...,"level":"ERROR","msg":...,"event":...,"session":...}`), so it's not lost — inspect with `tail -f ~/.config/trani/logs.jsonl | jq .` or filter by cause with `jq 'select(.event=="obsidian_open")' ~/.config/trani/logs.jsonl`.
+
 ## Configuration Reference
 
 See `docs/ADR/` for architecture decisions and rationale behind the audio capture and session design.
