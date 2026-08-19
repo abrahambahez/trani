@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-19
+
+### Fixed
+- Postprocessing (both the live session flow and `process`) no longer overwrites the note's existing content; the generated summary is now appended below it under a `## Resumen` heading, preserving any frontmatter or notes a template or the user already put there
+
+### Changed
+- **Breaking**: `process` now writes into the same `sessions_dir` as live sessions instead of its own per-audio directory, and no longer produces separate `transcripcion.txt`/`notas.md`/`resumen.md` files — output is a single note (named by timestamp, like live sessions) plus a `.sources/<timestamp>.txt` transcript
+- **Breaking**: `process` now exits with a non-zero status when the prompt template is missing or summary generation fails, instead of reporting success with the error message written in place of the summary
+- **Breaking**: Removed `--title` from `process` (it named the output directory but was never actually wired into the path); the output note is now named purely by timestamp, matching live sessions
+
 ## [2.2.0] - 2026-08-18
 
 ### Changed

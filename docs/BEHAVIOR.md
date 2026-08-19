@@ -34,10 +34,10 @@ There are two completely separate flows. They never share state, and a problem i
 
 ### Generating the summary
 
-- The accumulated transcript (with immediate repeated lines removed, a known artifact of transcription) is combined with whatever the user actually typed into the note while it was open, and this combination is sent off to generate a structured summary.
+- The accumulated transcript (with immediate repeated lines removed, a known artifact of transcription) is combined with whatever the user actually typed into the note while it was open (including any metadata and notes a template already put there), and this combination is sent off to generate a structured summary.
 - If no template for building that request can be found at all (neither the one asked for, nor the standard fallback), nothing is sent anywhere — the attempt is abandoned before it starts, the note is left exactly as the user left it, and the failure is reported.
 - If generating the summary fails for any other reason, or comes back empty, the note is again left completely untouched, and the failure is reported. A summary is never partially applied.
-- If it succeeds, the note's entire contents are replaced by the generated summary. There is no separate copy of the user's raw notes kept anywhere — once the summary lands, the note *is* the summary.
+- If it succeeds, the note's existing content (any metadata, the user's own notes) is left exactly as it was, and the generated summary is appended below it under its own heading. Nothing the user or a template already put in the note is ever discarded.
 - After that, the archived raw audio for the session is deleted, unless the configuration says to keep it.
 - A final notification reports whether the session finished successfully or failed.
 
@@ -60,7 +60,7 @@ flowchart TD
     J --> K[Transcript + user's notes sent to generate a summary]
     K -.no template found.-> L1[Abandoned before sending anything — note untouched, failure reported]
     K -.generation fails / empty result.-> L2[Note untouched, failure reported]
-    K -- succeeds --> L3[Note's contents fully replaced by the summary]
+    K -- succeeds --> L3[Summary appended below existing content, nothing discarded]
     L3 --> M{Configured to keep the audio?}
     M -- No --> N[Archived audio deleted]
     M -- Yes --> O[Archived audio kept]
@@ -68,13 +68,14 @@ flowchart TD
 
 ## 2. Standalone reprocessing
 
-This is a one-shot, run-to-completion command: it doesn't return until it's entirely done, and it never touches the vault, the "one active session" restriction, or anything from the flow above.
+This is a one-shot, run-to-completion command: it doesn't return until it's entirely done, and it never touches the vault or the "one active session" restriction. It postprocesses identically to a live session, just with a single-pass transcription instead of a progressive one, since there's no live recording to progress through.
 
 - Takes an already-recorded audio file, and optionally a separate file of notes.
-- Makes its own working copy of the audio, cleans it up, and transcribes it in a single pass — there's no progressive, while-it's-happening processing here, since there's no live recording to progress through.
-- Produces its own dedicated output location containing three separate files: the full transcript, a copy of the notes (if any were given), and the summary. This is different from the live session's single-note convention above.
-- If no template can be found to build the summary request, the whole command fails outright — but only *after* the audio has already been copied, processed, and transcribed to disk. Those partial results are not cleaned up when this happens.
-- If generating the summary itself fails, the command does **not** fail: the error message is written into the summary file in place of an actual summary, and the command still reports success.
+- Makes its own working copy of the audio, cleans it up, and transcribes it in a single pass. The raw transcript is saved alongside sessions' own archived transcripts, not in a separate location.
+- If a notes file was given, its content (including any metadata a template already put there) seeds the output note verbatim, exactly like a live session's note already holds the user's own content before postprocessing runs.
+- If no template can be found to build the summary request, the note is left exactly as it was seeded (or empty, if no notes file was given) and the command fails, reporting the failure.
+- If generating the summary fails for any other reason, or comes back empty, the note is again left untouched and the command fails, reporting the failure. A summary is never partially applied, and never written as if it were real output.
+- If it succeeds, the note's existing content is left exactly as it was, and the generated summary is appended below it under its own heading, same as a live session.
 - The working copy of the audio this command makes for itself is always deleted once it's done — there's no "keep the audio" setting for this flow the way there is for live sessions.
 
 ```mermaid
@@ -82,13 +83,13 @@ flowchart TD
     P[Reprocess an existing audio file] --> Q[Audio copied and cleaned up]
     Q --> R[Transcribed in one pass]
     R --> T{Notes file given?}
-    T -- Yes --> T2[Notes copied alongside]
+    T -- Yes --> T2[Note seeded with that content]
     T -- No --> U[Template for the summary request loaded]
     T2 --> U
-    U -.missing.-> U2[Command fails — partial files already on disk stay there]
+    U -.missing.-> U2[Note untouched, command fails, failure reported]
     U -- found --> V[Summary requested]
-    V -.fails.-> V2[Error message written as the summary itself — still reports success]
-    V -- succeeds --> V3[Summary written as its own file]
+    V -.fails / empty result.-> V2[Note untouched, command fails, failure reported]
+    V -- succeeds --> V3[Summary appended below existing content, nothing discarded]
     V2 --> W[Working audio copy deleted]
     V3 --> W
 ```

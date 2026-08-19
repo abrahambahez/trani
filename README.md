@@ -127,33 +127,30 @@ Whether the archived audio in `.sources/` is kept after processing is set via `a
 
 **process:**
 ```bash
-trani process <audio-file> --notes FILE --title NAME --prompt TEMPLATE
+trani process <audio-file> --notes FILE --prompt TEMPLATE
 ```
 
 - `<audio-file>`: Path to audio file to process (required)
 - `--notes`: Path to notes file to include in summary
-- `--title`: Output directory title (defaults to audio filename)
 - `--prompt`: Use custom prompt template (default: "default")
 
-`process` is a standalone, one-shot command for reprocessing an existing recording — it isn't part of the live session flow above, and keeps producing its own directory with a separate `resumen.md`.
+`process` is a standalone, one-shot command for reprocessing an existing recording — it isn't part of the live session flow above, but writes into the same `sessions_dir` and postprocesses identically (notes preserved, summary appended below them).
 
 ### Output Structure
 
 Sessions:
 ```
-<sessions_dir>/2026-01-15 1430.md                  # notes + final summary, same file
+<sessions_dir>/2026-01-15 1430.md                  # notes + appended summary, same file
 <sessions_dir>/.sources/2026-01-15 1430.txt        # accumulated raw transcript
 <sessions_dir>/.sources/2026-01-15 1430.wav        # archived audio (deleted unless audio.preserved is true)
 ```
 
 `process`:
 ```
-<sessions_dir>/2026-01-15 1430/
-├── transcripcion.txt  # Full transcription
-├── notas.md           # User notes
-└── resumen.md          # AI-generated summary
+<sessions_dir>/2026-01-15 1430.md                  # notes (if --notes given) + appended summary, same file
+<sessions_dir>/.sources/2026-01-15 1430.txt        # full transcription
 ```
-`process` always removes its copy of the audio file once done; `audio.preserved` only affects the live session flow.
+`process` always removes its working copy of the audio file once done; `audio.preserved` only affects the live session flow.
 
 ## Advanced Features
 

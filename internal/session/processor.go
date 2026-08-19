@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/sabhz/trani/internal/config"
@@ -14,20 +13,20 @@ import (
 	"github.com/sabhz/trani/pkg/notify"
 )
 
-func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplate string, cfg *config.Config) error {
+func ProcessFile(ctx context.Context, audioPath, notesPath, promptTemplate string, cfg *config.Config) error {
 	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
 		return fmt.Errorf("audio file not found: %s", audioPath)
 	}
 
-	if title == "" {
-		title = strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath))
+	sourcesTitle := time.Now().Format("2006-01-02 1504")
+	notePath := filepath.Join(cfg.Paths.SessionsDir, sourcesTitle+".md")
+	sourcesDir := filepath.Join(cfg.Paths.SessionsDir, ".sources")
+
+	if err := os.MkdirAll(sourcesDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
-
-	timestamp := time.Now().Format("2006-01-02 1504")
-	sessionPath := filepath.Join(cfg.Paths.SessionsDir, timestamp)
-
-	if err := os.MkdirAll(sessionPath, 0755); err != nil {
-		return fmt.Errorf("failed to create session directory: %w", err)
+	if err := os.MkdirAll(cfg.Paths.TempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
 	transcriber, err := transcribe.New(cfg.Transcription)
@@ -47,10 +46,11 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 	notifier := notify.New()
 	notifier.Info("🎙️ Trani", "Procesando audio...")
 
-	processedAudioPath := filepath.Join(sessionPath, "audio.wav")
+	processedAudioPath := filepath.Join(cfg.Paths.TempDir, sourcesTitle+".wav")
 	if err := copyFile(audioPath, processedAudioPath); err != nil {
 		return fmt.Errorf("failed to copy audio file: %w", err)
 	}
+	defer os.Remove(processedAudioPath)
 
 	if err := postProcessAudio(processedAudioPath); err != nil {
 		return fmt.Errorf("failed to process audio: %w", err)
@@ -61,47 +61,26 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, title, promptTemplat
 		return fmt.Errorf("transcription failed: %w", err)
 	}
 
-	transcriptionPath := filepath.Join(sessionPath, "transcripcion.txt")
+	transcriptionPath := filepath.Join(sourcesDir, sourcesTitle+".txt")
 	if err := os.WriteFile(transcriptionPath, []byte(transcription), 0644); err != nil {
 		return fmt.Errorf("failed to save transcription: %w", err)
 	}
 
-	notes := ""
 	if notesPath != "" {
 		notesContent, err := os.ReadFile(notesPath)
 		if err != nil {
 			return fmt.Errorf("failed to read notes file: %w", err)
 		}
-		notes = strings.TrimSpace(string(notesContent))
-
-		notesDestPath := filepath.Join(sessionPath, "notas.md")
-		if err := os.WriteFile(notesDestPath, notesContent, 0644); err != nil {
-			return fmt.Errorf("failed to save notes: %w", err)
+		if err := os.WriteFile(notePath, notesContent, 0644); err != nil {
+			return fmt.Errorf("failed to seed note: %w", err)
 		}
 	}
 
-	hasNotes := len(notes) > 0
-	template, err := loadPromptTemplateStandalone(cfg.Paths.PromptsDir, promptTemplate, hasNotes)
-	if err != nil {
-		return fmt.Errorf("failed to load prompt template: %w", err)
-	}
-	prompt := fillPromptTemplate(template, transcription, notes)
-
-	resumen, err := llmClient.Generate(ctx, prompt)
-	resumenPath := filepath.Join(sessionPath, "resumen.md")
-
-	if err != nil {
-		errorMsg := fmt.Sprintf("Error al generar resumen: %v", err)
-		os.WriteFile(resumenPath, []byte(errorMsg), 0644)
-	} else {
-		os.WriteFile(resumenPath, []byte(resumen), 0644)
+	if err := writeSummary(ctx, llmClient, notePath, transcription, cfg.Paths.PromptsDir, promptTemplate, sourcesTitle, notifier); err != nil {
+		return err
 	}
 
-	if err := os.Remove(processedAudioPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove audio file: %w", err)
-	}
-
-	notifier.Info("✅ Trani", fmt.Sprintf("Procesamiento completado - %s", sessionPath))
+	notifier.Info("✅ Trani", fmt.Sprintf("Procesamiento completado - %s", sourcesTitle))
 	return nil
 }
 

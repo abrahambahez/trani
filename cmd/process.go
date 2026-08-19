@@ -10,7 +10,6 @@ import (
 
 var (
 	processNotes  string
-	processTitle  string
 	processPrompt string
 )
 
@@ -34,7 +33,6 @@ var processCmd = &cobra.Command{
 			context.Background(),
 			audioPath,
 			processNotes,
-			processTitle,
 			processPrompt,
 			cfg,
 		)
@@ -43,7 +41,6 @@ var processCmd = &cobra.Command{
 
 func init() {
 	processCmd.Flags().StringVar(&processNotes, "notes", "", "Path to notes file")
-	processCmd.Flags().StringVar(&processTitle, "title", "", "Output directory title (defaults to audio filename)")
 	processCmd.Flags().StringVar(&processPrompt, "prompt", "default", "Prompt template name")
 	rootCmd.AddCommand(processCmd)
 }
