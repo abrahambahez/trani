@@ -6,10 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	startPrompt        string
-	startPreserveAudio bool
-)
+var startPrompt string
 
 var startCmd = &cobra.Command{
 	Use:   "start",
@@ -24,12 +21,11 @@ var startCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		return session.Launch(startPrompt, startPreserveAudio, cfg)
+		return session.Launch(startPrompt, cfg)
 	},
 }
 
 func init() {
 	startCmd.Flags().StringVar(&startPrompt, "prompt", "default", "Prompt template name")
-	startCmd.Flags().BoolVar(&startPreserveAudio, "preserve-audio", false, "Keep audio file after processing")
 	rootCmd.AddCommand(startCmd)
 }

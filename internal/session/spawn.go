@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"syscall"
 
 	"github.com/sabhz/trani/internal/config"
@@ -39,13 +38,12 @@ func spawnDetached(args ...string) error {
 // summarize, and finalize a session whose recording has already stopped.
 // It runs independently of the recording lock (already cleared by the
 // caller) so starting a new session does not wait for it to finish.
-func SpawnPostprocess(notePath, sourcesTitle, promptTemplate string, preserveAudio bool, notifyID string) error {
+func SpawnPostprocess(notePath, sourcesTitle, promptTemplate, notifyID string) error {
 	args := []string{
 		"__postprocess-worker",
 		"--note-path", notePath,
 		"--sources-title", sourcesTitle,
 		"--prompt", promptTemplate,
-		"--preserve-audio=" + strconv.FormatBool(preserveAudio),
 	}
 	if notifyID != "" {
 		args = append(args, "--notify-id", notifyID)
@@ -58,11 +56,10 @@ func SpawnPostprocess(notePath, sourcesTitle, promptTemplate string, preserveAud
 // recording session (Session.Start). It's used when the editor doesn't
 // block (Obsidian is a separate GUI app), since there's no editor process
 // for the invoking CLI command to wait on.
-func SpawnRecorder(promptTemplate string, preserveAudio bool) error {
+func SpawnRecorder(promptTemplate string) error {
 	args := []string{
 		"__record-worker",
 		"--prompt", promptTemplate,
-		"--preserve-audio=" + strconv.FormatBool(preserveAudio),
 	}
 
 	return spawnDetached(args...)
@@ -70,7 +67,7 @@ func SpawnRecorder(promptTemplate string, preserveAudio bool) error {
 
 // Launch starts a session as a detached background worker. Requires an
 // Obsidian vault to be configured.
-func Launch(promptTemplate string, preserveAudio bool, cfg *config.Config) error {
+func Launch(promptTemplate string, cfg *config.Config) error {
 	if cfg.Obsidian.VaultPath == "" {
 		return fmt.Errorf("obsidian.vault_path is not configured")
 	}
@@ -81,5 +78,5 @@ func Launch(promptTemplate string, preserveAudio bool, cfg *config.Config) error
 		return fmt.Errorf("session already active: %s", lock.Title)
 	}
 
-	return SpawnRecorder(promptTemplate, preserveAudio)
+	return SpawnRecorder(promptTemplate)
 }

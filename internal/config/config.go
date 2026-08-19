@@ -85,6 +85,7 @@ type AudioConfig struct {
 	MicDevice    string `yaml:"mic_device"`    // pactl source name; empty uses the default source
 	MixStrategy  string `yaml:"mix_strategy"`  // post_mix | separate_transcribe (mic_system only)
 	ChunkSeconds int    `yaml:"chunk_seconds"` // how often to segment and transcribe progressively
+	Preserve     bool   `yaml:"preserved"`     // keep the archived audio in .sources/ after processing
 }
 
 // PathsConfig contains file system paths.

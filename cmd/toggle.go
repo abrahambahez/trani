@@ -6,10 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	togglePrompt        string
-	togglePreserveAudio bool
-)
+var togglePrompt string
 
 var toggleCmd = &cobra.Command{
 	Use:   "toggle",
@@ -32,12 +29,11 @@ var toggleCmd = &cobra.Command{
 			return session.SignalStop(lock)
 		}
 
-		return session.Launch(togglePrompt, togglePreserveAudio, cfg)
+		return session.Launch(togglePrompt, cfg)
 	},
 }
 
 func init() {
 	toggleCmd.Flags().StringVar(&togglePrompt, "prompt", "default", "Prompt template name")
-	toggleCmd.Flags().BoolVar(&togglePreserveAudio, "preserve-audio", false, "Keep audio file after processing")
 	rootCmd.AddCommand(toggleCmd)
 }

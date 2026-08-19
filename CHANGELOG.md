@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-18
+
+### Changed
+- **Breaking**: `--preserve-audio` is no longer a CLI flag on `start`/`toggle` (or the hidden worker subcommands); whether the archived audio in `.sources/` is kept is now `audio.preserved` in `config.yaml`, applied consistently instead of having to be repeated on every invocation
+
 ## [2.1.0] - 2026-08-18
 
 ### Added

@@ -20,7 +20,7 @@ import (
 // overwrite the session note with it (the user's raw notes and the final
 // note are the same file). It runs in a detached process spawned by
 // SpawnPostprocess, decoupled from the recording lock.
-func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTemplate string, preserveAudio bool, notifyID string, cfg *config.Config) error {
+func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTemplate, notifyID string, cfg *config.Config) error {
 	notifier := notify.New()
 
 	llmClient, err := llm.New(cfg.LLM)
@@ -73,7 +73,7 @@ func RunPostprocessWorker(ctx context.Context, notePath, sourcesTitle, promptTem
 		return fmt.Errorf("failed to update session note: %w", err)
 	}
 
-	if !preserveAudio {
+	if !cfg.Audio.Preserve {
 		if err := os.Remove(wavPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove archived audio: %w", err)
 		}

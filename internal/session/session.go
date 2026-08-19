@@ -23,7 +23,6 @@ type Session struct {
 	title          string // also the .sources/<title> basename
 	notePath       string // sessions/<title>.md; the user's notes and the final summary are the same file
 	promptTemplate string
-	preserveAudio  bool
 	startedAt      time.Time
 	notifyID       string
 
@@ -38,7 +37,7 @@ type Session struct {
 func (s *Session) Title() string { return s.title }
 
 // New creates a new session with the given parameters.
-func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Session, error) {
+func New(promptTemplate string, cfg *config.Config) (*Session, error) {
 	timestamp := time.Now().Format("2006-01-02 1504")
 	notePath := filepath.Join(cfg.Paths.SessionsDir, timestamp+".md")
 
@@ -64,7 +63,6 @@ func New(promptTemplate string, preserveAudio bool, cfg *config.Config) (*Sessio
 		title:          timestamp,
 		notePath:       notePath,
 		promptTemplate: promptTemplate,
-		preserveAudio:  preserveAudio,
 		startedAt:      time.Now(),
 		recorder:       recorder,
 		transcriber:    transcriber,
@@ -98,7 +96,6 @@ func (s *Session) Start(ctx context.Context) error {
 		Path:           s.notePath,
 		StartedAt:      s.startedAt,
 		PromptTemplate: s.promptTemplate,
-		PreserveAudio:  s.preserveAudio,
 	}
 	if err := lock.Acquire(s.cfg); err != nil {
 		return err
@@ -187,7 +184,7 @@ func (s *Session) finishRecording(ctx context.Context, chunker *chunker) error {
 		s.notifier.Info("⏸️ Trani", "Grabación detenida. Procesando...")
 	}
 
-	return SpawnPostprocess(s.notePath, s.title, s.promptTemplate, s.preserveAudio, s.notifyID)
+	return SpawnPostprocess(s.notePath, s.title, s.promptTemplate, s.notifyID)
 }
 
 const defaultPromptWithNotes = `Tienes una transcripción de una sesión y las notas tomadas por el usuario.

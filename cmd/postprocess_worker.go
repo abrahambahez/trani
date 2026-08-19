@@ -12,11 +12,10 @@ import (
 )
 
 var (
-	postprocessNotePath      string
-	postprocessSourcesTitle  string
-	postprocessPrompt        string
-	postprocessPreserveAudio bool
-	postprocessNotifyID      string
+	postprocessNotePath     string
+	postprocessSourcesTitle string
+	postprocessPrompt       string
+	postprocessNotifyID     string
 )
 
 // postprocessWorkerCmd is an internal command spawned as a detached process
@@ -39,7 +38,6 @@ var postprocessWorkerCmd = &cobra.Command{
 			postprocessNotePath,
 			postprocessSourcesTitle,
 			postprocessPrompt,
-			postprocessPreserveAudio,
 			postprocessNotifyID,
 			cfg,
 		)
@@ -57,7 +55,6 @@ func init() {
 	postprocessWorkerCmd.Flags().StringVar(&postprocessNotePath, "note-path", "", "Path to the session note file")
 	postprocessWorkerCmd.Flags().StringVar(&postprocessSourcesTitle, "sources-title", "", "Original session timestamp, used to locate .sources/<title>.txt and .wav")
 	postprocessWorkerCmd.Flags().StringVar(&postprocessPrompt, "prompt", "default", "Prompt template name")
-	postprocessWorkerCmd.Flags().BoolVar(&postprocessPreserveAudio, "preserve-audio", false, "Keep audio file after processing")
 	postprocessWorkerCmd.Flags().StringVar(&postprocessNotifyID, "notify-id", "", "Notification ID to update on completion")
 	postprocessWorkerCmd.MarkFlagRequired("note-path")
 	postprocessWorkerCmd.MarkFlagRequired("sources-title")

@@ -21,7 +21,6 @@ type RecordingLock struct {
 	Path           string    `json:"path"`
 	StartedAt      time.Time `json:"started_at"`
 	PromptTemplate string    `json:"prompt_template"`
-	PreserveAudio  bool      `json:"preserve_audio"`
 	NotifyID       string    `json:"notify_id"`
 }
 

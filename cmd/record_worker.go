@@ -11,10 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	recordWorkerPrompt        string
-	recordWorkerPreserveAudio bool
-)
+var recordWorkerPrompt string
 
 // recordWorkerCmd is an internal command spawned as a detached process by
 // session.Launch when Obsidian is configured (no editor process to block
@@ -32,7 +29,7 @@ var recordWorkerCmd = &cobra.Command{
 		cfg.ExpandPaths()
 		cfg.ApplyDefaults()
 
-		sess, err := session.New(recordWorkerPrompt, recordWorkerPreserveAudio, cfg)
+		sess, err := session.New(recordWorkerPrompt, cfg)
 		if err != nil {
 			notify.New().Error("⚠️ Trani", fmt.Sprintf("Error al iniciar la sesión: %v", err))
 			errlog.Error("session_init", "", err)
@@ -53,6 +50,5 @@ var recordWorkerCmd = &cobra.Command{
 
 func init() {
 	recordWorkerCmd.Flags().StringVar(&recordWorkerPrompt, "prompt", "default", "Prompt template name")
-	recordWorkerCmd.Flags().BoolVar(&recordWorkerPreserveAudio, "preserve-audio", false, "Keep audio file after processing")
 	rootCmd.AddCommand(recordWorkerCmd)
 }

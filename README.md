@@ -74,6 +74,7 @@ audio:
   mic_device: ""           # pactl source name; empty uses the default source
   mix_strategy: post_mix   # post_mix | separate_transcribe (mic_system only)
   chunk_seconds: 300       # how often to segment and transcribe progressively
+  preserved: false         # keep the archived audio in .sources/ after processing (live session flow only)
 
 obsidian:
   vault_path: ~/vault      # required for start/toggle/stop
@@ -116,12 +117,13 @@ trani process audio.wav --notes notes.md --title "meeting-summary"
 
 **start/toggle:**
 ```bash
-trani start --prompt TEMPLATE --preserve-audio
-trani toggle --prompt TEMPLATE --preserve-audio
+trani start --prompt TEMPLATE
+trani toggle --prompt TEMPLATE
 ```
 
 - `--prompt`: Use custom prompt template (default: "default")
-- `--preserve-audio`: Keep the archived audio in `.sources/` after processing
+
+Whether the archived audio in `.sources/` is kept after processing is set via `audio.preserved` in the config, not a flag.
 
 **process:**
 ```bash
@@ -141,7 +143,7 @@ Sessions:
 ```
 <sessions_dir>/2026-01-15 1430.md                  # notes + final summary, same file
 <sessions_dir>/.sources/2026-01-15 1430.txt        # accumulated raw transcript
-<sessions_dir>/.sources/2026-01-15 1430.wav        # archived audio (deleted unless --preserve-audio)
+<sessions_dir>/.sources/2026-01-15 1430.wav        # archived audio (deleted unless audio.preserved is true)
 ```
 
 `process`:
@@ -149,9 +151,9 @@ Sessions:
 <sessions_dir>/2026-01-15 1430/
 ├── transcripcion.txt  # Full transcription
 ├── notas.md           # User notes
-├── resumen.md          # AI-generated summary
-└── audio.wav           # (optional, with --preserve-audio)
+└── resumen.md          # AI-generated summary
 ```
+`process` always removes its copy of the audio file once done; `audio.preserved` only affects the live session flow.
 
 ## Advanced Features
 
