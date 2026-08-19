@@ -34,8 +34,8 @@ func buildObsidianURI(vaultPath, notePath string) (string, error) {
 
 	return fmt.Sprintf(
 		"obsidian://open?vault=%s&file=%s",
-		url.QueryEscape(vaultName),
-		url.QueryEscape(relPath),
+		url.PathEscape(vaultName),
+		url.PathEscape(relPath),
 	), nil
 }
 

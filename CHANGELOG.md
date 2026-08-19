@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-08-19
+
+### Fixed
+- Obsidian couldn't find the session note when opening it automatically, whenever the note's filename or vault name contained a space: `buildObsidianURI` used `url.QueryEscape`, which encodes spaces as `+` (form-encoding convention); Obsidian's URI handler is a generic URI parser, not form-aware, so it read the `+` literally instead of as a space. Switched to `url.PathEscape`, which encodes spaces as `%20`. Since this failure happens entirely inside Obsidian's own process (the `xdg-open` call itself succeeds), it never reached trani's error log — only a transient Obsidian notification reported it.
+
 ## [2.4.0] - 2026-08-19
 
 ### Added

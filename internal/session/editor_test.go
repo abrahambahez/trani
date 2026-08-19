@@ -25,7 +25,19 @@ func TestBuildObsidianURI(t *testing.T) {
 			name:      "vault name with a space",
 			vaultPath: "/home/user/my vault",
 			notePath:  "/home/user/my vault/note.md",
-			expected:  "obsidian://open?vault=my+vault&file=note",
+			expected:  "obsidian://open?vault=my%20vault&file=note",
+		},
+		{
+			name:      "note filename with a space (timestamp-based session names)",
+			vaultPath: "/home/user/vault",
+			notePath:  "/home/user/vault/2026-08-19 1437.md",
+			expected:  "obsidian://open?vault=vault&file=2026-08-19%201437",
+		},
+		{
+			name:      "note nested in a subdirectory with a space in the filename",
+			vaultPath: "/home/user/vault",
+			notePath:  "/home/user/vault/diario/2026-08-19 1437.md",
+			expected:  "obsidian://open?vault=vault&file=diario%2F2026-08-19%201437",
 		},
 	}
 
