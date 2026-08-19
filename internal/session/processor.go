@@ -56,16 +56,7 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, promptTemplate strin
 		return fmt.Errorf("failed to process audio: %w", err)
 	}
 
-	transcription, err := transcriber.Transcribe(ctx, processedAudioPath)
-	if err != nil {
-		return fmt.Errorf("transcription failed: %w", err)
-	}
-
-	transcriptionPath := filepath.Join(sourcesDir, sourcesTitle+".txt")
-	if err := os.WriteFile(transcriptionPath, []byte(transcription), 0644); err != nil {
-		return fmt.Errorf("failed to save transcription: %w", err)
-	}
-
+	var prompt string
 	if notesPath != "" {
 		notesContent, err := os.ReadFile(notesPath)
 		if err != nil {
@@ -74,6 +65,17 @@ func ProcessFile(ctx context.Context, audioPath, notesPath, promptTemplate strin
 		if err := os.WriteFile(notePath, notesContent, 0644); err != nil {
 			return fmt.Errorf("failed to seed note: %w", err)
 		}
+		prompt = buildTranscriptionPrompt(string(notesContent))
+	}
+
+	transcription, err := transcriber.Transcribe(ctx, processedAudioPath, prompt)
+	if err != nil {
+		return fmt.Errorf("transcription failed: %w", err)
+	}
+
+	transcriptionPath := filepath.Join(sourcesDir, sourcesTitle+".txt")
+	if err := os.WriteFile(transcriptionPath, []byte(transcription), 0644); err != nil {
+		return fmt.Errorf("failed to save transcription: %w", err)
 	}
 
 	if err := writeSummary(ctx, llmClient, notePath, transcription, cfg.Paths.PromptsDir, promptTemplate, sourcesTitle, notifier); err != nil {

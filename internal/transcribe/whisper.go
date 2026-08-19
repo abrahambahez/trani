@@ -39,7 +39,7 @@ func NewWhisperLocal(cfg config.LocalWhisperConfig) (*WhisperLocal, error) {
 }
 
 // Transcribe converts audio to text using local whisper.cpp.
-func (w *WhisperLocal) Transcribe(ctx context.Context, audioPath string) (string, error) {
+func (w *WhisperLocal) Transcribe(ctx context.Context, audioPath, prompt string) (string, error) {
 	if _, err := os.Stat(w.binaryPath); os.IsNotExist(err) {
 		return "", fmt.Errorf("whisper binary not found at %s", w.binaryPath)
 	}
@@ -62,6 +62,9 @@ func (w *WhisperLocal) Transcribe(ctx context.Context, audioPath string) (string
 		"-t", strconv.Itoa(w.threads),
 		"-otxt",
 		"-of", outputBase,
+	}
+	if prompt != "" {
+		args = append(args, "--prompt", prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, w.binaryPath, args...)

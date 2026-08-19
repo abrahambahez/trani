@@ -19,7 +19,7 @@ type stubTranscriber struct {
 	texts []string // one per call, cycling through if exhausted
 }
 
-func (s *stubTranscriber) Transcribe(ctx context.Context, audioPath string) (string, error) {
+func (s *stubTranscriber) Transcribe(ctx context.Context, audioPath, prompt string) (string, error) {
 	s.calls = append(s.calls, audioPath)
 	if len(s.texts) == 0 {
 		return "", nil
@@ -64,7 +64,7 @@ func TestChunkerProcessesNewSegmentsProgressively(t *testing.T) {
 	recorder := audio.New(cfg.Audio, tempDir)
 	transcriber := &stubTranscriber{texts: []string{"hola", "mundo"}}
 
-	c, err := newChunker(cfg, "20260101-1200", recorder, transcriber)
+	c, err := newChunker(cfg, "20260101-1200", "", recorder, transcriber)
 	if err != nil {
 		t.Fatalf("newChunker failed: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestChunkerMicSystemWaitsForBothStreams(t *testing.T) {
 	recorder := audio.New(cfg.Audio, tempDir)
 	transcriber := &stubTranscriber{texts: []string{"mezclado"}}
 
-	c, err := newChunker(cfg, "20260101-1200", recorder, transcriber)
+	c, err := newChunker(cfg, "20260101-1200", "", recorder, transcriber)
 	if err != nil {
 		t.Fatalf("newChunker failed: %v", err)
 	}

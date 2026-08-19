@@ -191,7 +191,7 @@ func TestWhisperLocal_TranscribeMissingBinary(t *testing.T) {
 		t.Fatalf("Failed to create test audio file: %v", err)
 	}
 
-	_, err := whisper.Transcribe(context.Background(), audioPath)
+	_, err := whisper.Transcribe(context.Background(), audioPath, "")
 	if err == nil {
 		t.Fatal("Transcribe() should error when binary doesn't exist")
 	}
@@ -219,7 +219,7 @@ func TestWhisperLocal_TranscribeMissingModel(t *testing.T) {
 		t.Fatalf("Failed to create test audio file: %v", err)
 	}
 
-	_, err := whisper.Transcribe(context.Background(), audioPath)
+	_, err := whisper.Transcribe(context.Background(), audioPath, "")
 	if err == nil {
 		t.Fatal("Transcribe() should error when model doesn't exist")
 	}
@@ -246,7 +246,7 @@ func TestWhisperLocal_TranscribeMissingAudioFile(t *testing.T) {
 		language:   "en",
 	}
 
-	_, err := whisper.Transcribe(context.Background(), filepath.Join(tempDir, "nonexistent.wav"))
+	_, err := whisper.Transcribe(context.Background(), filepath.Join(tempDir, "nonexistent.wav"), "")
 	if err == nil {
 		t.Fatal("Transcribe() should error when audio file doesn't exist")
 	}
@@ -269,7 +269,7 @@ func TestOpenAI_TranscribeMissingAPIKey(t *testing.T) {
 		t.Fatalf("Failed to create test audio file: %v", err)
 	}
 
-	_, err := openai.Transcribe(context.Background(), audioPath)
+	_, err := openai.Transcribe(context.Background(), audioPath, "")
 	if err == nil {
 		t.Fatal("Transcribe() should error when API key is empty")
 	}
@@ -284,7 +284,7 @@ func TestOpenAI_TranscribeMissingAudioFile(t *testing.T) {
 		language: "en",
 	}
 
-	_, err := openai.Transcribe(context.Background(), filepath.Join(tempDir, "nonexistent.wav"))
+	_, err := openai.Transcribe(context.Background(), filepath.Join(tempDir, "nonexistent.wav"), "")
 	if err == nil {
 		t.Fatal("Transcribe() should error when audio file doesn't exist")
 	}

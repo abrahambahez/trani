@@ -8,9 +8,11 @@ import (
 	"github.com/sabhz/trani/internal/config"
 )
 
-// Transcriber converts audio files to text.
+// Transcriber converts audio files to text. prompt, when non-empty, is fed
+// to the model as prior context to bias word/spelling choices (e.g. proper
+// nouns) on ambiguous audio; both backends treat "" as no prompt.
 type Transcriber interface {
-	Transcribe(ctx context.Context, audioPath string) (string, error)
+	Transcribe(ctx context.Context, audioPath, prompt string) (string, error)
 }
 
 // New creates a Transcriber based on the configured backend.

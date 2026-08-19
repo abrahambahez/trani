@@ -41,7 +41,7 @@ type openaiResponse struct {
 }
 
 // Transcribe converts audio to text using OpenAI Whisper API.
-func (o *OpenAI) Transcribe(ctx context.Context, audioPath string) (string, error) {
+func (o *OpenAI) Transcribe(ctx context.Context, audioPath, prompt string) (string, error) {
 	if o.apiKey == "" {
 		return "", fmt.Errorf("OpenAI API key is required")
 	}
@@ -79,6 +79,13 @@ func (o *OpenAI) Transcribe(ctx context.Context, audioPath string) (string, erro
 	if o.language != "" {
 		if err := writer.WriteField("language", o.language); err != nil {
 			return "", fmt.Errorf("failed to write language field: %w", err)
+		}
+	}
+
+	// Add prompt field if specified, to bias word/spelling choices
+	if prompt != "" {
+		if err := writer.WriteField("prompt", prompt); err != nil {
+			return "", fmt.Errorf("failed to write prompt field: %w", err)
 		}
 	}
 

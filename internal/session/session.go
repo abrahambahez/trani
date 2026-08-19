@@ -106,7 +106,7 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
-	chunker, err := newChunker(s.cfg, s.title, s.recorder, s.transcriber)
+	chunker, err := newChunker(s.cfg, s.title, s.notePath, s.recorder, s.transcriber)
 	if err != nil {
 		s.recorder.Stop()
 		ClearLock(s.cfg)

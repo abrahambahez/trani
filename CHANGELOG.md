@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-19
+
+### Added
+- Transcription prompt context: the session note's YAML frontmatter (attendees, purpose, etc., filled in by an external note-taking template before trani touches the file) is now extracted and passed as an initial prompt to Whisper on every transcription call, biasing word/spelling choices toward proper nouns and terms already known from the note — fixes cases like "Trani" being misheard as "Tranny". Short fields are prioritized over long free-text ones within the prompt budget. Supported on both the `openai` and `local` (whisper.cpp) backends, though the `local` backend's `--prompt` flag name is unverified since no binary is installed on the machine this was built on.
+
 ## [2.3.0] - 2026-08-19
 
 ### Fixed

@@ -24,6 +24,7 @@ const chunkPollInterval = 20 * time.Second
 // instead of all at once when the session stops.
 type chunker struct {
 	cfg         *config.Config
+	notePath    string
 	recorder    *audio.Recorder
 	transcriber transcribe.Transcriber
 
@@ -33,7 +34,7 @@ type chunker struct {
 	processed int
 }
 
-func newChunker(cfg *config.Config, sourcesTitle string, recorder *audio.Recorder, transcriber transcribe.Transcriber) (*chunker, error) {
+func newChunker(cfg *config.Config, sourcesTitle, notePath string, recorder *audio.Recorder, transcriber transcribe.Transcriber) (*chunker, error) {
 	sourcesDir := filepath.Join(cfg.Paths.SessionsDir, ".sources")
 	if err := os.MkdirAll(sourcesDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create sources directory: %w", err)
@@ -41,11 +42,24 @@ func newChunker(cfg *config.Config, sourcesTitle string, recorder *audio.Recorde
 
 	return &chunker{
 		cfg:         cfg,
+		notePath:    notePath,
 		recorder:    recorder,
 		transcriber: transcriber,
 		txtPath:     filepath.Join(sourcesDir, sourcesTitle+".txt"),
 		wavPath:     filepath.Join(sourcesDir, sourcesTitle+".wav"),
 	}, nil
+}
+
+// transcriptionPrompt reads the session note fresh (it may not exist yet
+// for the first chunks, or may still be mid-write by the note-taking app)
+// and extracts a prompt from its frontmatter. Fails open to "" on any
+// error — a missing prompt must never block transcription.
+func (c *chunker) transcriptionPrompt() string {
+	content, err := os.ReadFile(c.notePath)
+	if err != nil {
+		return ""
+	}
+	return buildTranscriptionPrompt(string(content))
 }
 
 // run polls for newly closed chunks until stop is closed. Per-chunk errors
@@ -127,7 +141,7 @@ func (c *chunker) processMicOnlyChunk(ctx context.Context, chunkPath string) err
 		return fmt.Errorf("failed to process audio: %w", err)
 	}
 
-	text, err := c.transcriber.Transcribe(ctx, chunkPath)
+	text, err := c.transcriber.Transcribe(ctx, chunkPath, c.transcriptionPrompt())
 	if err != nil {
 		return fmt.Errorf("transcription failed: %w", err)
 	}
@@ -158,19 +172,21 @@ func (c *chunker) processMicSystemChunk(ctx context.Context, micPath, systemPath
 	}
 	defer os.Remove(combinedPath)
 
+	prompt := c.transcriptionPrompt()
+
 	var text string
 	if c.cfg.Audio.MixStrategy == config.MixStrategySeparateTranscribe {
-		micText, err := c.transcriber.Transcribe(ctx, micPath)
+		micText, err := c.transcriber.Transcribe(ctx, micPath, prompt)
 		if err != nil {
 			return fmt.Errorf("microphone transcription failed: %w", err)
 		}
-		systemText, err := c.transcriber.Transcribe(ctx, systemPath)
+		systemText, err := c.transcriber.Transcribe(ctx, systemPath, prompt)
 		if err != nil {
 			return fmt.Errorf("system audio transcription failed: %w", err)
 		}
 		text = strings.TrimSpace(strings.TrimSpace(micText) + "\n" + strings.TrimSpace(systemText))
 	} else {
-		transcription, err := c.transcriber.Transcribe(ctx, combinedPath)
+		transcription, err := c.transcriber.Transcribe(ctx, combinedPath, prompt)
 		if err != nil {
 			return fmt.Errorf("transcription failed: %w", err)
 		}
